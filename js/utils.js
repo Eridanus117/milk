@@ -151,20 +151,20 @@ function deduplicateContentArray(arr, baseSystemArray = []) {
 
                 // =============== 内置合成音效（两方 + 预设） ===============
                 const CATEGORY_BASE = {
-                    my_send: { osc1Type: 'sine', osc2Type: 'triangle', freq: 820, dur: 0.16, up: 1.08, down: 0.65 },
-                    partner_message: { osc1Type: 'sine', osc2Type: 'triangle', freq: 620, dur: 0.17, up: 1.05, down: 0.62 },
-                    my_poke: { osc1Type: 'triangle', osc2Type: 'sine', freq: 540, dur: 0.14, up: 1.18, down: 0.68 },
-                    partner_poke: { osc1Type: 'triangle', osc2Type: 'sine', freq: 540, dur: 0.14, up: 1.18, down: 0.68 }
+                    my_send: { osc1Type: 'triangle', osc2Type: 'sine', freq: 520, dur: 0.18, up: 1.06, down: 0.72 },
+                    partner_message: { osc1Type: 'triangle', osc2Type: 'sine', freq: 460, dur: 0.2, up: 1.04, down: 0.74 },
+                    my_poke: { osc1Type: 'sawtooth', osc2Type: 'triangle', freq: 400, dur: 0.16, up: 1.08, down: 0.76 },
+                    partner_poke: { osc1Type: 'sawtooth', osc2Type: 'triangle', freq: 380, dur: 0.16, up: 1.08, down: 0.76 }
                 };
 
                 const PRESET_EFFECTS = {
                     // 预设 effect：允许覆盖波形与倍率（不填则沿用基础音色）
-                    tone_default: { osc1Type: null, osc2Type: null, fMul: 1, durMul: 1, upMul: 1, downMul: 1 },
-                    tone_soft: { osc1Type: 'sine', osc2Type: 'sine', fMul: 0.98, durMul: 1.1, upMul: 0.98, downMul: 0.98 },
-                    tone_bright: { osc1Type: 'triangle', osc2Type: 'triangle', fMul: 1.08, durMul: 0.9, upMul: 1.05, downMul: 0.97 },
-                    tone_deep: { osc1Type: 'sawtooth', osc2Type: 'triangle', fMul: 0.85, durMul: 1.2, upMul: 1.0, downMul: 0.9 },
-                    tone_mystic: { osc1Type: 'square', osc2Type: 'sine', fMul: 0.98, durMul: 1.0, upMul: 1.02, downMul: 1.0 },
-                    tone_sparkle: { osc1Type: 'sawtooth', osc2Type: 'triangle', fMul: 1.15, durMul: 0.8, upMul: 1.15, downMul: 1.05 }
+                    tone_default: { osc1Type: 'triangle', osc2Type: 'sine', fMul: 0.92, durMul: 1.08, upMul: 1.0, downMul: 0.95 },
+                    tone_soft: { osc1Type: 'sine', osc2Type: 'triangle', fMul: 0.88, durMul: 1.15, upMul: 0.98, downMul: 0.92 },
+                    tone_low: { osc1Type: 'sawtooth', osc2Type: 'triangle', fMul: 0.78, durMul: 1.2, upMul: 0.96, downMul: 0.88 },
+                    tone_warm: { osc1Type: 'triangle', osc2Type: 'triangle', fMul: 0.84, durMul: 1.1, upMul: 0.98, downMul: 0.9 },
+                    tone_dark: { osc1Type: 'square', osc2Type: 'triangle', fMul: 0.72, durMul: 1.25, upMul: 0.95, downMul: 0.85 },
+                    tone_haze: { osc1Type: 'sine', osc2Type: 'square', fMul: 0.8, durMul: 1.18, upMul: 0.97, downMul: 0.9 }
                 };
 
                 const presetId = (() => {

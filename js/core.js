@@ -1277,21 +1277,6 @@ if (!isBatchMode && type === 'normal') {
                         } catch (e) {}
                     }, autoHideMs);
 
-                            // 更强兜底：硬性超时隐藏，避免异常/定时器被清导致“正在输入中”永远不消失
-                            if (window._typingIndicatorHardHideTimer) clearTimeout(window._typingIndicatorHardHideTimer);
-                            window._typingIndicatorHardHideTimer = setTimeout(function() {
-                                try {
-                                    var _tiW = document.getElementById('typing-indicator-wrapper');
-                                    if (_tiW && _tiW.style.display !== 'none') {
-                                        var _tiInner = _tiW.querySelector('.typing-indicator');
-                                        if (_tiInner) _tiInner.classList.add('hiding');
-                                        setTimeout(function() {
-                                            _tiW.style.display = 'none';
-                                            if (_tiInner) _tiInner.classList.remove('hiding');
-                                        }, 240);
-                                    }
-                                } catch (e) {}
-                            }, 60000);
                 } catch (e) {}
             }
             if (tiAvatar) {
@@ -1447,21 +1432,6 @@ if (!isBatchMode && type === 'normal') {
                             } catch (e) {}
                         }, autoHideMs);
 
-                            // 更强兜底：硬性超时隐藏，避免异常/定时器被清导致“正在输入中”永远不消失
-                            if (window._typingIndicatorHardHideTimer) clearTimeout(window._typingIndicatorHardHideTimer);
-                            window._typingIndicatorHardHideTimer = setTimeout(function() {
-                                try {
-                                    var _tiW = document.getElementById('typing-indicator-wrapper');
-                                    if (_tiW && _tiW.style.display !== 'none') {
-                                        var _tiInner = _tiW.querySelector('.typing-indicator');
-                                        if (_tiInner) _tiInner.classList.add('hiding');
-                                        setTimeout(function() {
-                                            _tiW.style.display = 'none';
-                                            if (_tiInner) _tiInner.classList.remove('hiding');
-                                        }, 240);
-                                    }
-                                } catch (e) {}
-                            }, 60000);
                     } catch (e) {}
                 }
                 if (tiAvatar) {
@@ -1501,8 +1471,9 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                 }
             }
             if (Math.random() < 0.03) {
-                if (customPokes && customPokes.length > 0) {
-                    let randomAction = getRandomItem(customPokes);
+                // 对方拍一拍仅使用内置动作，不读取我方自定义拍一拍库
+                if (CONSTANTS.POKE_ACTIONS && CONSTANTS.POKE_ACTIONS.length > 0) {
+                    let randomAction = getRandomItem(CONSTANTS.POKE_ACTIONS);
                     if (typeof window._sanitizePokeTextForDisplay === 'function') {
                         randomAction = window._sanitizePokeTextForDisplay(randomAction);
                     }
@@ -1517,15 +1488,34 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                         type: 'system'
                     });
                     if (typeof playSound === 'function') playSound('partner_poke');
-                (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}if(window._typingIndicatorHardHideTimer){clearTimeout(window._typingIndicatorHardHideTimer);window._typingIndicatorHardHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
+                (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
         return;
     }
 }
 
             const replyCount = Math.random() < 0.75 ? 1: (Math.random() < 0.95 ? 2: 3);
             if (!customReplies || customReplies.length === 0) {
-                (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}if(window._typingIndicatorHardHideTimer){clearTimeout(window._typingIndicatorHardHideTimer);window._typingIndicatorHardHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
+                (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
                 showNotification('还没有添加字卡，请先到"自定义回复"中添加字卡', 'info', 4000);
+                return;
+            }
+            const disabledItemsOnce = (() => {
+                try {
+                    const raw = localStorage.getItem('disabledReplyItems');
+                    return raw ? new Set(JSON.parse(raw)) : new Set();
+                } catch (e) { return new Set(); }
+            })();
+            const disabledGroupItemsOnce = new Set();
+            (window.customReplyGroups || []).forEach(g => {
+                if (g.disabled && Array.isArray(g.items)) g.items.forEach(item => disabledGroupItemsOnce.add(item));
+            });
+            const replyPoolOnce = customReplies
+                .filter(r => !disabledItemsOnce.has(r) && !disabledGroupItemsOnce.has(r))
+                .map(r => String(r || '').trim())
+                .filter(Boolean);
+            if (!replyPoolOnce.length) {
+                (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
+                showNotification('回复库可用内容为空，请检查是否全部被屏蔽/分组禁用', 'warning', 3500);
                 return;
             }
             let delay = 0;
@@ -1536,22 +1526,20 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                 const delayRange = settings.replyDelayMax - settings.replyDelayMin;
                 delay += settings.replyDelayMin + Math.random() * delayRange;
                 setTimeout(() => {
-                    let disabledItems = new Set();
-                    try {
-                        const raw = localStorage.getItem('disabledReplyItems');
-                        if (raw) disabledItems = new Set(JSON.parse(raw));
-                    } catch(e) {}
-
-                    const disabledGroupItems = new Set();
-                    const _groups = window.customReplyGroups || [];
-                    _groups.forEach(g => {
-                        if (g.disabled && Array.isArray(g.items)) {
-                            g.items.forEach(item => disabledGroupItems.add(item));
+                    const replyPool = replyPoolOnce;
+                    // 被屏蔽或无效项直接换下一个，尽量保证每次都产出可用回复
+                    let replyText = '';
+                    for (let t = 0; t < 6; t++) {
+                        const picked = replyPool[Math.floor(Math.random() * replyPool.length)];
+                        if (picked && String(picked).trim()) {
+                            replyText = String(picked).trim();
+                            break;
                         }
-                    });
-
-                    const replyPool = customReplies.filter(r => !disabledItems.has(r) && !disabledGroupItems.has(r));
-                    const replyText = replyPool[Math.floor(Math.random() * replyPool.length)];
+                    }
+                    if (!replyText && i === replyCount - 1) {
+                        (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
+                        return;
+                    }
 
                     let disabledStickerItems = new Set();
                     try {
@@ -1635,10 +1623,6 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                                 if (window._typingIndicatorAutoHideTimer) {
                                     clearTimeout(window._typingIndicatorAutoHideTimer);
                                     window._typingIndicatorAutoHideTimer = null;
-                                }
-                                if (window._typingIndicatorHardHideTimer) {
-                                    clearTimeout(window._typingIndicatorHardHideTimer);
-                                    window._typingIndicatorHardHideTimer = null;
                                 }
                             } catch (e) {}
                             var _tiW = document.getElementById('typing-indicator-wrapper');
