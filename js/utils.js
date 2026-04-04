@@ -362,143 +362,133 @@ async function exportAllData() {
 
 async function importAllData(file) {
     if (!file) return;
-    if (file.size > 120 * 1024 * 1024) {
-        showNotification('文件过大（>120MB），请确认是否为正确备份', 'error');
+    if (file.size > 220 * 1024 * 1024) {
+        showNotification('文件过大（>220MB），请确认是否为正确备份', 'error');
         return;
     }
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        try {
-            let raw = e.target.result;
-            if (typeof raw !== 'string') {
-                showNotification('无法读取该备份文件', 'error');
-                return;
-            }
-            if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
-            const data = JSON.parse(raw);
-            const fullLike = typeof ChatBackup !== 'undefined' && ChatBackup.isFullBackupShape
-                ? ChatBackup.isFullBackupShape(data)
-                : (
-                    data.type === 'full' ||
-                    (typeof data.type === 'string' && data.type.includes('full-backup')) ||
-                    !!data.indexedDB ||
-                    !!data.localforage
-                );
-            if (!fullLike) {
-                if (typeof importChatHistory === 'function') importChatHistory(file);
-                return;
-            }
-            if (typeof ChatBackup === 'undefined' || !ChatBackup.applyBackupToStorage) {
-                showNotification('备份模块未加载，请刷新页面重试', 'error');
-                return;
-            }
-            if (!confirm('导入全量备份将按你的选择覆盖对应数据。\n\n头像/背景等如勾选导入会写入备份中的内容。\n\n确定继续吗？')) return;
-
-            const categories = [
-                {
-                    id: 'chat',
-                    label: '聊天记录 / 会话 / 红包',
-                    indexedDBNeedles: ['chatMessages', 'sessionList', 'chatSettings', 'showPartnerNameInChat', 'envelopeData', 'pending_envelope'],
-                    localStorageNeedles: ['groupChatSettings']
-                },
-                {
-                    id: 'replies',
-                    label: '回复 / 拍一拍 / 氛围',
-                    indexedDBNeedles: ['customReplies', 'customPokes', 'customStatuses', 'customMottos', 'customIntros', 'customEmojis', 'customReplyGroups'],
-                    localStorageNeedles: ['disabledReplyItems', 'pokeSym_my', 'pokeSym_partner', 'pokeSym_my_custom', 'pokeSym_partner_custom']
-                },
-                {
-                    id: 'stickers',
-                    label: '表情库（贴纸）',
-                    indexedDBNeedles: ['stickerLibrary', 'myStickerLibrary'],
-                    localStorageNeedles: ['disabledStickerItems']
-                },
-                {
-                    id: 'ann',
-                    label: '纪念日',
-                    indexedDBNeedles: ['anniversaries'],
-                    localStorageNeedles: []
-                },
-                {
-                    id: 'mood',
-                    label: '心晴手账',
-                    indexedDBNeedles: ['moodCalendar', 'customMoodOptions', 'moodTrash'],
-                    localStorageNeedles: []
-                },
-                {
-                    id: 'themes',
-                    label: '主题 / 外观 / 图库',
-                    indexedDBNeedles: ['customThemes', 'themeSchemes', 'backgroundGallery', 'chatBackground', 'partnerAvatar', 'myAvatar', 'partnerPersonas'],
-                    localStorageNeedles: []
-                },
-                {
-                    id: 'dg',
-                    label: '每日公告 / 运势 / 天气',
-                    indexedDBNeedles: ['dg_custom_data', 'dg_status_pool', 'weekly_fortune', 'daily_fortune'],
-                    localStorageNeedles: [],
-                    localStoragePrefixes: ['customWeather_']
-                }
-            ];
-
-            const pickSelected = () => new Promise((resolve) => {
-                const overlay = document.createElement('div');
-                overlay.style.cssText = `
-                    position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.6);
-                    backdrop-filter:blur(10px);display:flex;align-items:flex-end;justify-content:center;
-                `;
-                overlay.innerHTML = `
-                    <div style="
-                        width:100%;max-width:560px;background:var(--secondary-bg);border-radius:24px 24px 0 0;
-                        box-shadow:0 -10px 60px rgba(0,0,0,0.3);
-                        padding:16px 18px env(safe-area-inset-bottom,0);
-                    ">
-                        <div style="width:36px;height:4px;border-radius:2px;background:var(--border-color);margin:0 auto 14px;"></div>
-                        <div style="font-size:16px;font-weight:800;color:var(--text-primary);margin-bottom:10px;">全量恢复：选择要导入的部分</div>
-                        <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">支持 v4 精简备份与旧版 JSON；图片以去重表还原。</div>
-                        <div style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow:auto;padding-right:6px;">
-                            ${categories.map(c => {
-                                return `
-                                    <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 12px;border:1.5px solid var(--border-color);border-radius:16px;background:var(--primary-bg);">
-                                        <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${c.label}</span>
-                                        <input type="checkbox" data-cat="${c.id}" checked style="transform:scale(1.1);accent-color:var(--accent-color);">
-                                    </label>
-                                `;
-                            }).join('')}
-                        </div>
-                        <div style="display:flex;gap:10px;margin-top:14px;">
-                            <button id="full-imp-cancel" class="modal-btn modal-btn-secondary" style="flex:1;padding:12px 0;">取消</button>
-                            <button id="full-imp-confirm" class="modal-btn modal-btn-primary" style="flex:1;padding:12px 0;">确认恢复</button>
-                        </div>
-                    </div>
-                `;
-                overlay.addEventListener('click', (ev) => { if (ev.target === overlay) { overlay.remove(); resolve(null); } });
-                document.getElementById('full-imp-cancel').onclick = () => { overlay.remove(); resolve(null); };
-                document.getElementById('full-imp-confirm').onclick = () => {
-                    const selected = Array.from(overlay.querySelectorAll('input[type=checkbox]:checked'))
-                        .map(i => i.dataset.cat);
-                    overlay.remove();
-                    resolve(selected);
-                };
-                document.body.appendChild(overlay);
-            });
-
-            const selectedCats = await pickSelected();
-            if (!selectedCats || selectedCats.length === 0) return;
-
-            showNotification('正在恢复数据…', 'info', 3000);
-            await ChatBackup.applyBackupToStorage(data, {
-                selective: true,
-                selectedCategoryIds: selectedCats,
-                categories
-            });
-
-            showNotification('恢复完成，即将刷新页面…', 'success', 2000);
-            setTimeout(() => location.reload(), 2200);
-        } catch (err) {
-            console.error('全量导入失败:', err);
-            showNotification('文件损坏或格式不兼容', 'error');
+    try {
+        if (typeof ChatBackup === 'undefined' || !ChatBackup.loadBackupFromFile || !ChatBackup.applyBackupToStorage) {
+            showNotification('备份模块未加载，请刷新页面重试', 'error');
+            return;
         }
-    };
-    reader.onerror = () => showNotification('文件读取失败', 'error');
-    reader.readAsText(file, 'UTF-8');
+        const data = await ChatBackup.loadBackupFromFile(file);
+        const fullLike = ChatBackup.isFullBackupShape
+            ? ChatBackup.isFullBackupShape(data)
+            : (
+                data.type === 'full' ||
+                (typeof data.type === 'string' && data.type.includes('full-backup')) ||
+                !!data.indexedDB ||
+                !!data.localforage
+            );
+        if (!fullLike) {
+            if (typeof importChatHistory === 'function') importChatHistory(file);
+            return;
+        }
+        if (!confirm('导入全量备份将按你的选择覆盖对应数据。\n\n头像/背景等如勾选导入会写入备份中的内容。\n\n确定继续吗？')) return;
+
+        const categories = [
+            {
+                id: 'chat',
+                label: '聊天记录 / 会话 / 红包',
+                indexedDBNeedles: ['chatMessages', 'sessionList', 'chatSettings', 'showPartnerNameInChat', 'envelopeData', 'pending_envelope'],
+                localStorageNeedles: ['groupChatSettings']
+            },
+            {
+                id: 'replies',
+                label: '回复 / 拍一拍 / 氛围',
+                indexedDBNeedles: ['customReplies', 'customPokes', 'customStatuses', 'customMottos', 'customIntros', 'customEmojis', 'customReplyGroups'],
+                localStorageNeedles: ['disabledReplyItems', 'pokeSym_my', 'pokeSym_partner', 'pokeSym_my_custom', 'pokeSym_partner_custom']
+            },
+            {
+                id: 'stickers',
+                label: '表情库（贴纸）',
+                indexedDBNeedles: ['stickerLibrary', 'myStickerLibrary'],
+                localStorageNeedles: ['disabledStickerItems']
+            },
+            {
+                id: 'ann',
+                label: '纪念日',
+                indexedDBNeedles: ['anniversaries'],
+                localStorageNeedles: []
+            },
+            {
+                id: 'mood',
+                label: '心晴手账',
+                indexedDBNeedles: ['moodCalendar', 'customMoodOptions', 'moodTrash'],
+                localStorageNeedles: []
+            },
+            {
+                id: 'themes',
+                label: '主题 / 外观 / 图库',
+                indexedDBNeedles: ['customThemes', 'themeSchemes', 'backgroundGallery', 'chatBackground', 'partnerAvatar', 'myAvatar', 'partnerPersonas'],
+                localStorageNeedles: []
+            },
+            {
+                id: 'dg',
+                label: '每日公告 / 运势 / 天气',
+                indexedDBNeedles: ['dg_custom_data', 'dg_status_pool', 'weekly_fortune', 'daily_fortune'],
+                localStorageNeedles: [],
+                localStoragePrefixes: ['customWeather_']
+            }
+        ];
+
+        const pickSelected = () => new Promise((resolve) => {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.6);
+                backdrop-filter:blur(10px);display:flex;align-items:flex-end;justify-content:center;
+            `;
+            overlay.innerHTML = `
+                <div style="
+                    width:100%;max-width:560px;background:var(--secondary-bg);border-radius:24px 24px 0 0;
+                    box-shadow:0 -10px 60px rgba(0,0,0,0.3);
+                    padding:16px 18px env(safe-area-inset-bottom,0);
+                ">
+                    <div style="width:36px;height:4px;border-radius:2px;background:var(--border-color);margin:0 auto 14px;"></div>
+                    <div style="font-size:16px;font-weight:800;color:var(--text-primary);margin-bottom:10px;">全量恢复：选择要导入的部分</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">支持 v5 ZIP（推荐）、v4 JSON 与旧版；媒体从去重表或 ZIP 内 media/ 还原。</div>
+                    <div style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow:auto;padding-right:6px;">
+                        ${categories.map(c => {
+                            return `
+                                <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 12px;border:1.5px solid var(--border-color);border-radius:16px;background:var(--primary-bg);">
+                                    <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${c.label}</span>
+                                    <input type="checkbox" data-cat="${c.id}" checked style="transform:scale(1.1);accent-color:var(--accent-color);">
+                                </label>
+                            `;
+                        }).join('')}
+                    </div>
+                    <div style="display:flex;gap:10px;margin-top:14px;">
+                        <button id="full-imp-cancel" class="modal-btn modal-btn-secondary" style="flex:1;padding:12px 0;">取消</button>
+                        <button id="full-imp-confirm" class="modal-btn modal-btn-primary" style="flex:1;padding:12px 0;">确认恢复</button>
+                    </div>
+                </div>
+            `;
+            overlay.addEventListener('click', (ev) => { if (ev.target === overlay) { overlay.remove(); resolve(null); } });
+            document.getElementById('full-imp-cancel').onclick = () => { overlay.remove(); resolve(null); };
+            document.getElementById('full-imp-confirm').onclick = () => {
+                const selected = Array.from(overlay.querySelectorAll('input[type=checkbox]:checked'))
+                    .map(i => i.dataset.cat);
+                overlay.remove();
+                resolve(selected);
+            };
+            document.body.appendChild(overlay);
+        });
+
+        const selectedCats = await pickSelected();
+        if (!selectedCats || selectedCats.length === 0) return;
+
+        showNotification('正在恢复数据…', 'info', 3000);
+        await ChatBackup.applyBackupToStorage(data, {
+            selective: true,
+            selectedCategoryIds: selectedCats,
+            categories
+        });
+
+        showNotification('恢复完成，即将刷新页面…', 'success', 2000);
+        setTimeout(() => location.reload(), 2200);
+    } catch (err) {
+        console.error('全量导入失败:', err);
+        const msg = err && err.message ? err.message : '未知错误';
+        showNotification('导入失败：' + msg, 'error', 5000);
+    }
 }

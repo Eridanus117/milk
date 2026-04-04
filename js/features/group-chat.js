@@ -260,7 +260,7 @@ if (exportAllBtn) {
                     <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:4px;display:flex;align-items:center;gap:8px;">
                         <i class="fas fa-archive" style="color:var(--accent-color);font-size:14px;"></i>全量备份导出
                     </div>
-                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px;">大图片会<strong>去重打包</strong>，体积远小于旧版；可按模块勾选。</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:16px;">默认导出为 <strong>ZIP</strong>：<code style="font-size:11px;">backup.json</code> 仅存结构与引用，大图在 <code style="font-size:11px;">media/</code>，避免单文件 JSON 过大导致无法解析。</div>
                     <div style="display:flex;flex-direction:column;gap:9px;margin-bottom:20px;">
                         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border:1px solid var(--border-color);border-radius:12px;background:var(--primary-bg);font-size:13px;color:var(--text-primary);">
                             <input type="checkbox" id="_bk_msgs" checked style="accent-color:var(--accent-color);width:15px;height:15px;">
@@ -351,55 +351,42 @@ if (importAllBtn) {
         importAllBtn.addEventListener('click', function() {
             var input = document.createElement('input');
             input.type = 'file';
-            input.accept = '.json';
+            input.accept = '.json,.zip,application/json,application/zip';
             input.onchange = async function(e) {
                 var file = e.target.files[0];
                 if (!file) return;
-                
-                if (file.size > 100 * 1024 * 1024) {
+
+                if (file.size > 220 * 1024 * 1024) {
                     if (typeof showNotification === 'function') showNotification('文件过大，请检查是否是正确的备份文件', 'error');
                     return;
                 }
-                
-                var reader = new FileReader();
-                reader.onload = async function(ev) {
-                    try {
-                        var backup;
-                        try {
-                            var rawText = ev.target.result;
-                            if (rawText.charCodeAt(0) === 0xFEFF) rawText = rawText.slice(1);
-                            backup = JSON.parse(rawText);
-                        } catch(parseErr) {
-                            if (typeof showNotification === 'function') showNotification('文件解析失败，文件可能已损坏或不是有效的 JSON', 'error');
-                            return;
-                        }
-                        
-                        var okShape = backup.type === 'full' ||
-                            (backup.type && backup.type.indexOf('backup') !== -1) ||
-                            backup.formatVersion === 4 ||
-                            backup.localforage ||
-                            backup.indexedDB;
-                        if (!okShape) throw new Error('不是有效的传讯备份文件');
 
-                        if (!confirm('导入全量备份将覆盖备份文件中包含的数据（按文件内容写入）。\n\nv4 备份会还原图片去重表；旧版备份按原样写入。\n\n确定继续吗？')) return;
-
-                        if (typeof ChatBackup !== 'undefined' && ChatBackup.applyBackupToStorage) {
-                            await ChatBackup.applyBackupToStorage(backup, { selective: false });
-                        } else {
-                            throw new Error('备份模块未加载，请刷新页面');
-                        }
-
-                        if (typeof showNotification === 'function') showNotification('数据恢复成功，即将刷新页面应用更改', 'success', 2000);
-                        setTimeout(function() { location.reload(); }, 2000);
-                    } catch(e) {
-                        if (typeof showNotification === 'function') showNotification('导入失败：' + e.message, 'error');
-                        console.error('导入报错:', e);
+                try {
+                    if (typeof ChatBackup === 'undefined' || !ChatBackup.loadBackupFromFile || !ChatBackup.applyBackupToStorage) {
+                        throw new Error('备份模块未加载，请刷新页面');
                     }
-                };
-                reader.onerror = function() {
-                    if (typeof showNotification === 'function') showNotification('文件读取失败，请重试', 'error');
-                };
-                reader.readAsText(file, 'UTF-8');
+                    var backup = await ChatBackup.loadBackupFromFile(file);
+
+                    var okShape = backup.type === 'chatapp-backup-v5' ||
+                        backup.type === 'full' ||
+                        (backup.type && backup.type.indexOf('backup') !== -1) ||
+                        backup.formatVersion === 4 ||
+                        backup.formatVersion === 5 ||
+                        backup.localforage ||
+                        backup.indexedDB;
+                    if (!okShape) throw new Error('不是有效的传讯备份文件');
+
+                    if (!confirm('导入全量备份将覆盖备份文件中包含的数据（按文件内容写入）。\n\nv5 ZIP：从 media/ 还原图片；v4 JSON：从 mediaStore 还原。\n\n确定继续吗？')) return;
+
+                    await ChatBackup.applyBackupToStorage(backup, { selective: false });
+
+                    if (typeof showNotification === 'function') showNotification('数据恢复成功，即将刷新页面应用更改', 'success', 2000);
+                    setTimeout(function() { location.reload(); }, 2000);
+                } catch (err) {
+                    var msg = err && err.message ? err.message : '未知错误';
+                    if (typeof showNotification === 'function') showNotification('导入失败：' + msg, 'error', 5000);
+                    console.error('导入报错:', err);
+                }
             };
             document.body.appendChild(input);
             input.click();

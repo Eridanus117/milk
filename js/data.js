@@ -294,7 +294,7 @@
             if (importAllReal) importAllReal.addEventListener('click', function () {
                 closeDrawer('dm-drawer-full');
                 var inp = document.createElement('input');
-                inp.type = 'file'; inp.accept = '.json';
+                inp.type = 'file'; inp.accept = '.json,.zip,application/json,application/zip';
                 inp.onchange = function (e) {
                     var f = e.target.files && e.target.files[0];
                     if (f && typeof importAllData === 'function') importAllData(f);
@@ -363,7 +363,7 @@
         var importAll = mc.querySelector('#import-all-settings');
         if (importAll) importAll.addEventListener('click', function () {
             var inp = document.createElement('input');
-            inp.type = 'file'; inp.accept = '.json';
+            inp.type = 'file'; inp.accept = '.json,.zip,application/json,application/zip';
             inp.onchange = function (e) {
                 var f = e.target.files && e.target.files[0];
                 if (f && typeof importAllData === 'function') importAllData(f);

@@ -1,6 +1,6 @@
 /**
- * 统一备份/恢复：媒体去重外置、会话 ID 重映射、兼容旧版 JSON 结构。
- * 依赖：localforage、全局 APP_PREFIX / SESSION_ID（导入时）、showNotification（可选）
+ * 统一备份/恢复：v5 默认 ZIP（结构 JSON + media/ 二进制），避免单文件巨型 JSON 无法解析；
+ * v4 单文件 JSON 仍可导入。依赖：localforage、JSZip（CDN）、全局 APP_PREFIX / SESSION_ID。
  */
 (function (global) {
     'use strict';
@@ -13,6 +13,52 @@
 
     function isDataMediaUrl(s) {
         return typeof s === 'string' && s.length > MIN_MEDIA_CHARS && /^data:(image|video)\//i.test(s);
+    }
+
+    function isZipArrayBuffer(ab) {
+        if (!ab || ab.byteLength < 4) return false;
+        var u = new Uint8Array(ab);
+        return u[0] === 0x50 && u[1] === 0x4b && (u[2] === 0x03 || u[2] === 0x05 || u[2] === 0x07) &&
+            (u[3] === 0x04 || u[3] === 0x06 || u[3] === 0x08);
+    }
+
+    function dataUrlToBinary(dataUrl) {
+        if (typeof dataUrl !== 'string') return null;
+        var m = /^data:([^,]+),([\s\S]*)$/.exec(dataUrl);
+        if (!m) return null;
+        var header = m[1];
+        var body = m[2].replace(/\s/g, '');
+        var mime = header.split(';')[0].trim();
+        var isB64 = /;base64/i.test(header);
+        if (isB64) {
+            try {
+                var binary = atob(body);
+                var len = binary.length;
+                var bytes = new Uint8Array(len);
+                for (var i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+                return { mime: mime, bytes: bytes };
+            } catch (e) {
+                return null;
+            }
+        }
+        try {
+            return { mime: mime, bytes: new TextEncoder().encode(decodeURIComponent(body)) };
+        } catch (e2) {
+            return null;
+        }
+    }
+
+    function uint8ToBase64Chunked(u8) {
+        var CHUNK = 0x8000;
+        var str = '';
+        for (var i = 0; i < u8.length; i += CHUNK) {
+            str += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + CHUNK, u8.length)));
+        }
+        return btoa(str);
+    }
+
+    function binaryToDataUrl(mime, u8) {
+        return 'data:' + (mime || 'application/octet-stream') + ';base64,' + uint8ToBase64Chunked(u8);
     }
 
     function deepCloneJsonSafe(obj) {
@@ -224,12 +270,141 @@
         setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
     }
 
+    /**
+     * 从 ZIP 解析备份（v5）；若包内为旧版单 JSON（仅改扩展名等）则按其中 JSON 原样返回。
+     */
+    async function parseZipBackup(arrayBuffer) {
+        if (typeof JSZip === 'undefined') throw new Error('JSZip 未加载，无法读取 ZIP 备份，请检查网络后刷新页面');
+        var zip = await JSZip.loadAsync(arrayBuffer);
+        var jsonFile = zip.file('backup.json');
+        if (!jsonFile) {
+            var names = Object.keys(zip.files).filter(function (n) {
+                var e = zip.files[n];
+                return e && !e.dir && /\.json$/i.test(n);
+            });
+            if (names.length === 1) jsonFile = zip.file(names[0]);
+        }
+        if (!jsonFile) throw new Error('ZIP 内未找到 backup.json');
+        var raw = await jsonFile.async('string');
+        if (raw.length && raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+        var data = JSON.parse(raw);
+        var idx = data.mediaIndex;
+        if (data.formatVersion === 5 && data.type === 'chatapp-backup-v5' && idx && typeof idx === 'object') {
+            var built = {};
+            var ids = Object.keys(idx);
+            for (var i = 0; i < ids.length; i++) {
+                var id = ids[i];
+                var meta = idx[id];
+                var path = (meta && meta.path) ? meta.path : ('media/' + id);
+                var zf = zip.file(path);
+                if (!zf) {
+                    console.warn('[backup] ZIP 缺少媒体文件', path);
+                    continue;
+                }
+                var mimeMeta = (meta && meta.mime) ? meta.mime : 'application/octet-stream';
+                if (mimeMeta === 'text/plain+dataurl') {
+                    built[id] = await zf.async('string');
+                } else {
+                    var ab = await zf.async('arraybuffer');
+                    built[id] = binaryToDataUrl(mimeMeta, new Uint8Array(ab));
+                }
+            }
+            var ms = data.mediaStore || {};
+            for (var k in ms) {
+                if (Object.prototype.hasOwnProperty.call(ms, k) && built[k] == null) built[k] = ms[k];
+            }
+            data.mediaStore = built;
+        }
+        return data;
+    }
+
+    async function loadBackupFromArrayBuffer(ab) {
+        if (isZipArrayBuffer(ab)) return await parseZipBackup(ab);
+        var text = new TextDecoder('utf-8', { fatal: false }).decode(ab);
+        if (text.length && text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        return JSON.parse(text);
+    }
+
+    async function loadBackupFromFile(file) {
+        var ab = await file.arrayBuffer();
+        return await loadBackupFromArrayBuffer(ab);
+    }
+
     async function exportBackupToFile(flags) {
-        if (typeof showNotification === 'function') showNotification('正在打包备份（图片去重中）…', 'info', 2500);
+        if (typeof showNotification === 'function') showNotification('正在打包备份（ZIP：结构与媒体分离）…', 'info', 4000);
         var payload = await buildBackupPayload(flags);
+        var dateStr = new Date().toISOString().slice(0, 10);
+        var fileNameZip = 'chatapp-backup-' + dateStr + '.zip';
+
+        if (typeof JSZip !== 'undefined') {
+            try {
+                var zip = new JSZip();
+                var store = payload.mediaStore || {};
+                var mediaIndex = {};
+                for (var sid in store) {
+                    if (!Object.prototype.hasOwnProperty.call(store, sid)) continue;
+                    var url = store[sid];
+                    var parts = dataUrlToBinary(url);
+                    var path = 'media/' + sid;
+                    if (parts && parts.bytes && parts.bytes.length) {
+                        zip.file(path, parts.bytes, { binary: true });
+                        mediaIndex[sid] = { path: path, mime: parts.mime };
+                    } else {
+                        var txtPath = path + '.txt';
+                        zip.file(txtPath, String(url));
+                        mediaIndex[sid] = { path: txtPath, mime: 'text/plain+dataurl' };
+                    }
+                }
+                var jsonBody = {
+                    type: 'chatapp-backup-v5',
+                    formatVersion: 5,
+                    appName: payload.appName || 'ChatApp',
+                    timestamp: payload.timestamp,
+                    sessionId: payload.sessionId,
+                    appPrefix: payload.appPrefix,
+                    modules: payload.modules,
+                    localforage: payload.localforage,
+                    localStorage: payload.localStorage,
+                    mediaIndex: mediaIndex
+                };
+                zip.file('backup.json', '\uFEFF' + JSON.stringify(jsonBody));
+                var zipBlob = await zip.generateAsync({
+                    type: 'blob',
+                    compression: 'DEFLATE',
+                    compressionOptions: { level: 6 }
+                });
+                if (navigator.share && /Mobile|Android|iPhone|iPad/.test(navigator.userAgent)) {
+                    try {
+                        var shareFile = new File([zipBlob], fileNameZip, { type: 'application/zip' });
+                        if (navigator.canShare && navigator.canShare({ files: [shareFile] })) {
+                            await navigator.share({
+                                files: [shareFile],
+                                title: '传讯全量备份',
+                                text: 'ZIP 备份：' + new Date().toLocaleDateString()
+                            });
+                            if (typeof showNotification === 'function') showNotification('备份导出成功', 'success');
+                            return;
+                        }
+                    } catch (e) { /* fall through */ }
+                }
+                downloadBlob(zipBlob, fileNameZip);
+                if (typeof showNotification === 'function') {
+                    showNotification('已导出 ZIP：主 JSON 不含大图，导入更不易失败', 'success', 3500);
+                }
+                return;
+            } catch (zipErr) {
+                console.error('[backup] ZIP 导出失败，回退单文件 JSON', zipErr);
+                if (typeof showNotification === 'function') {
+                    showNotification('ZIP 打包失败，已改为单文件 JSON（大备份可能较难解析）', 'warning', 4500);
+                }
+            }
+        } else if (typeof showNotification === 'function') {
+            showNotification('JSZip 未加载，将导出单文件 JSON', 'warning', 3000);
+        }
+
         var str = serializeBackupV4(payload);
         var blob = new Blob([str], { type: 'application/json;charset=utf-8' });
-        var fileName = 'chatapp-backup-' + new Date().toISOString().slice(0, 10) + '.json';
+        var fileName = 'chatapp-backup-' + dateStr + '.json';
         if (navigator.share && /Mobile|Android|iPhone|iPad/.test(navigator.userAgent)) {
             try {
                 var f = new File([blob], fileName, { type: 'application/json' });
@@ -238,10 +413,10 @@
                     if (typeof showNotification === 'function') showNotification('备份导出成功', 'success');
                     return;
                 }
-            } catch (e) { /* fall through */ }
+            } catch (e2) { /* fall through */ }
         }
         downloadBlob(blob, fileName);
-        if (typeof showNotification === 'function') showNotification('备份导出成功', 'success');
+        if (typeof showNotification === 'function') showNotification('备份导出成功（JSON）', 'success');
     }
 
     function getLfSource(data) {
@@ -350,6 +525,7 @@
 
     function isFullBackupShape(d) {
         if (!d || typeof d !== 'object') return false;
+        if (d.formatVersion === 5 && d.type === 'chatapp-backup-v5') return true;
         if (d.formatVersion === 4 && d.type === 'chatapp-backup-v4') return true;
         if (d.type === 'full' || (typeof d.type === 'string' && d.type.indexOf('full-backup') !== -1)) return true;
         if (d.indexedDB && typeof d.indexedDB === 'object') return true;
@@ -363,6 +539,8 @@
         inlineMediaTree: inlineMediaTree,
         buildBackupPayload: buildBackupPayload,
         exportBackupToFile: exportBackupToFile,
+        loadBackupFromFile: loadBackupFromFile,
+        loadBackupFromArrayBuffer: loadBackupFromArrayBuffer,
         applyBackupToStorage: applyBackupToStorage,
         serializeBackupV4: serializeBackupV4,
         getLfSource: getLfSource,
