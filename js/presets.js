@@ -591,6 +591,15 @@
         ...geGeTeaseReplies
     ]);
 
+    const bundledCustomEmojis = unique([
+        '🥹', '🥲', '☺️', '😇', '😉', '😌', '🥰', '😗', '😋', '🤨', '🧐', '😎',
+        '🙂‍↔️', '🙂‍↕️', '😞', '☹️', '😣', '😫', '🥺', '😠', '🤯', '😳', '😶‍🌫️', '😥',
+        '🤔', '🫢', '🫡', '🤫', '🫠', '😶', '😐', '🫨', '😯', '🥱', '😴', '😮‍💨',
+        '🤧', '😈', '😼', '😽', '🫶🏻', '🤲🏻', '👏🏻', '👍🏻', '👎🏻', '✌🏻', '👌🏻', '🤏🏻',
+        '🫳🏻', '👉🏻👈🏻', '👋🏻', '💪🏻', '✍🏻', '🙏🏻', '🫂', '✉️', '💌', '📩', '📬',
+        '📡', '🛰️', '🔮', '🃏', '✨', '🌙', '☀️', '⭐', '⚠️', '❌', '✔️'
+    ]);
+
     const groups = [
         {
             id: 1001,
@@ -750,7 +759,7 @@
 
     window.LYSK_BUNDLED_PRESET = {
         id: 'lysk-group-v1',
-        version: 6,
+        version: 7,
         name: '恋与深空五人群聊预设',
         chatSettings: {
             partnerName: '深空群聊',
@@ -770,7 +779,8 @@
         },
         replyPreset: {
             customReplies: allReplies,
-            customReplyGroups: groups
+            customReplyGroups: groups,
+            customEmojis: bundledCustomEmojis
         }
     };
 
@@ -823,21 +833,25 @@
 
         const repliesKey = ctx.getStorageKey('customReplies');
         const groupsKey = ctx.getStorageKey('customReplyGroups');
+        const emojisKey = ctx.getStorageKey('customEmojis');
         const settingsKey = ctx.getStorageKey('chatSettings');
 
         let existingReplies = null;
         let existingGroups = null;
+        let existingEmojis = null;
         let existingSettings = null;
         let existingGroupChatSettings = null;
 
         try { existingReplies = await ctx.localforage.getItem(repliesKey); } catch (e) {}
         try { existingGroups = await ctx.localforage.getItem(groupsKey); } catch (e) {}
+        try { existingEmojis = await ctx.localforage.getItem(emojisKey); } catch (e) {}
         try { existingSettings = await ctx.localforage.getItem(settingsKey); } catch (e) {}
         try { existingGroupChatSettings = JSON.parse(localStorage.getItem('groupChatSettings') || 'null'); } catch (e) {}
 
         const hasExistingData =
             (Array.isArray(existingReplies) && existingReplies.length > 0) ||
             (Array.isArray(existingGroups) && existingGroups.length > 0) ||
+            (Array.isArray(existingEmojis) && existingEmojis.length > 0) ||
             (existingGroupChatSettings && Array.isArray(existingGroupChatSettings.members) && existingGroupChatSettings.members.length > 0);
 
         if (!options.force && hasExistingData) return false;
@@ -845,11 +859,15 @@
         try {
             const replyItems = unique(preset.replyPreset.customReplies || []);
             const replyGroups = cloneJson(preset.replyPreset.customReplyGroups || []);
+            const emojiItems = unique(preset.replyPreset.customEmojis || []);
             if (preset.replyPreset && Array.isArray(preset.replyPreset.customReplies)) {
                 await ctx.localforage.setItem(repliesKey, replyItems);
             }
             if (preset.replyPreset && Array.isArray(preset.replyPreset.customReplyGroups)) {
                 await ctx.localforage.setItem(groupsKey, replyGroups);
+            }
+            if (preset.replyPreset && Array.isArray(preset.replyPreset.customEmojis)) {
+                await ctx.localforage.setItem(emojisKey, emojiItems);
             }
             if (preset.chatSettings && typeof preset.chatSettings === 'object') {
                 await ctx.localforage.setItem(settingsKey, Object.assign({}, existingSettings || {}, preset.chatSettings));
@@ -864,6 +882,7 @@
             }
             try { localStorage.removeItem('disabledReplyItems'); } catch (e) {}
             if (typeof customReplies !== 'undefined') customReplies = replyItems.slice();
+            if (typeof customEmojis !== 'undefined') customEmojis = emojiItems.slice();
             if (typeof window.customReplyGroups !== 'undefined') window.customReplyGroups = cloneJson(replyGroups);
             if (typeof settings !== 'undefined' && preset.chatSettings) Object.assign(settings, preset.chatSettings);
             if (typeof window._customReplies !== 'undefined') window._customReplies = replyItems.slice();
