@@ -69,7 +69,15 @@ function readDisabledReplyItems() {
     }
 }
 
-function buildSpeakerReplyPool(speakerName) {
+function getReplyGroupTone(group) {
+    if (!group || typeof group !== 'object') return 'public';
+    if (group.scope === 'public') return 'public';
+    var name = String(group.name || '').trim();
+    if (/夜话|暧昧|撩拨|夜火/.test(name)) return 'intimate';
+    return 'speaker';
+}
+
+function buildSpeakerReplyBuckets(speakerName) {
     var allReplies = (typeof customReplies !== 'undefined' && Array.isArray(customReplies))
         ? customReplies
         : (Array.isArray(window.customReplies) ? window.customReplies : []);
@@ -87,21 +95,53 @@ function buildSpeakerReplyPool(speakerName) {
     });
 
     var seen = new Set();
-    var pool = [];
+    var buckets = { public: [], speaker: [], intimate: [] };
     structuredGroups.forEach(function(g) {
         var isPublic = g.scope === 'public';
         var isSpeaker = String(g.speaker || '').trim() === speakerName;
         if ((!isPublic && !isSpeaker) || g.disabled) return;
+        var tone = getReplyGroupTone(g);
         g.items.forEach(function(item) {
             var text = String(item || '').trim();
             if (!text || seen.has(text) || !validItems.has(text)) return;
             if (disabledItems.has(text) || disabledGroupItems.has(text)) return;
             seen.add(text);
-            pool.push(text);
+            buckets[tone].push(text);
         });
     });
 
-    return pool;
+    return buckets;
+}
+
+function pickWeightedReplyFromBuckets(buckets, options) {
+    if (!buckets) return null;
+    options = options || {};
+    var hour = new Date().getHours();
+    var isLateNight = hour >= 22 || hour < 4;
+    var weightedPools = [];
+
+    if (buckets.speaker && buckets.speaker.length) weightedPools.push({ items: buckets.speaker, weight: isLateNight ? 11 : 12 });
+    if (options.allowPublic !== false && buckets.public && buckets.public.length) weightedPools.push({ items: buckets.public, weight: 1 });
+    if (buckets.intimate && buckets.intimate.length) weightedPools.push({ items: buckets.intimate, weight: isLateNight ? 4 : 1 });
+
+    if (!weightedPools.length && buckets.public && buckets.public.length) {
+        weightedPools.push({ items: buckets.public, weight: 1 });
+    }
+
+    if (!weightedPools.length) return null;
+
+    var totalWeight = weightedPools.reduce(function(sum, entry) { return sum + entry.weight; }, 0);
+    var roll = Math.random() * totalWeight;
+    for (var i = 0; i < weightedPools.length; i++) {
+        roll -= weightedPools[i].weight;
+        if (roll <= 0) {
+            var bucket = weightedPools[i].items;
+            return bucket[Math.floor(Math.random() * bucket.length)];
+        }
+    }
+
+    var lastBucket = weightedPools[weightedPools.length - 1].items;
+    return lastBucket[Math.floor(Math.random() * lastBucket.length)];
 }
 
 function getGroupMemberAvatarRef(member, index) {
@@ -155,9 +195,12 @@ function getGroupReplyCandidates() {
     if (!groupChatSettings.enabled || !groupChatSettings.members || groupChatSettings.members.length === 0) return [];
     if (!getStructuredReplyGroups().length) return [];
     return groupChatSettings.members.map(function(member) {
-        return { member: member, pool: buildSpeakerReplyPool(member.name) };
+        return { member: member, buckets: buildSpeakerReplyBuckets(member.name) };
     }).filter(function(entry) {
-        return entry.pool && entry.pool.length > 0;
+        return entry.buckets
+            && ((entry.buckets.speaker && entry.buckets.speaker.length)
+                || (entry.buckets.public && entry.buckets.public.length)
+                || (entry.buckets.intimate && entry.buckets.intimate.length));
     });
 }
 
@@ -182,11 +225,13 @@ window.buildGroupChatReplyPlan = function(count) {
         shuffled[j] = tmp;
     }
 
-    return shuffled.slice(0, targetCount).map(function(chosen) {
+    var publicSlot = Math.random() < 0.45 ? Math.floor(Math.random() * targetCount) : -1;
+    return shuffled.slice(0, targetCount).map(function(chosen, index) {
+        var text = pickWeightedReplyFromBuckets(chosen.buckets, { allowPublic: index === publicSlot });
         return {
             member: chosen.member,
-            pool: chosen.pool,
-            text: chosen.pool[Math.floor(Math.random() * chosen.pool.length)]
+            buckets: chosen.buckets,
+            text: text || ''
         };
     });
 };
