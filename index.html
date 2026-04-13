@@ -585,6 +585,11 @@
                 <button onclick="openAddGroupMember()" class="modal-btn modal-btn-primary" style="padding:5px 12px;font-size:12px;"><i class="fas fa-plus"></i> 添加</button>
             </div>
             <div id="group-members-list" style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;"></div>
+            <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+                <button class="modal-btn modal-btn-secondary" id="reset-group-preset-btn" style="padding:7px 12px;font-size:12px;">
+                    <i class="fas fa-rotate-left"></i> 重置为内置预设
+                </button>
+            </div>
         </div>
 
         <div class="modal-buttons">
@@ -2218,6 +2223,7 @@
     <script src="js/utils.js"></script>
     <script src="js/backup-engine.js"></script>
     <script src="js/state.js"></script>
+    <script src="js/presets.js"></script>
     <script src="js/core.js"></script>
 
     <!-- == 功能模块 == -->

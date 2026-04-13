@@ -32,14 +32,99 @@ window.switchStatsTab = function(tab) {
     }
 };
 
+function normalizeGroupChatSettings(saved) {
+    if (!saved || typeof saved !== 'object') return { enabled: false, showAvatar: true, showName: true, members: [] };
+    if (!Array.isArray(saved.members)) saved.members = [];
+    if (saved.showAvatar === undefined) saved.showAvatar = true;
+    if (saved.showName === undefined) saved.showName = true;
+    saved.enabled = !!saved.enabled;
+    return saved;
+}
+
 var groupChatSettings = (function() {
     try {
-        var saved = JSON.parse(localStorage.getItem('groupChatSettings') || 'null');
-        if (!saved) return { enabled: false, showAvatar: true, showName: true, members: [] };
-        if (!saved.members) saved.members = [];
-        return saved;
-    } catch(e) { return { enabled: false, showAvatar: true, showName: true, members: [] }; }
+        return normalizeGroupChatSettings(JSON.parse(localStorage.getItem('groupChatSettings') || 'null'));
+    } catch(e) {
+        return normalizeGroupChatSettings(null);
+    }
 })();
+
+function findGroupMemberByName(name) {
+    if (!name || !groupChatSettings.members || groupChatSettings.members.length === 0) return null;
+    return groupChatSettings.members.find(function(m) { return m && m.name === name; }) || null;
+}
+
+function getStructuredReplyGroups() {
+    return (window.customReplyGroups || []).filter(function(g) {
+        return g && Array.isArray(g.items) && (g.scope === 'public' || (typeof g.speaker === 'string' && g.speaker.trim()));
+    });
+}
+
+function readDisabledReplyItems() {
+    try {
+        var raw = localStorage.getItem('disabledReplyItems');
+        return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch (e) {
+        return new Set();
+    }
+}
+
+function buildSpeakerReplyPool(speakerName) {
+    var allReplies = (typeof customReplies !== 'undefined' && Array.isArray(customReplies))
+        ? customReplies
+        : (Array.isArray(window.customReplies) ? window.customReplies : []);
+    var allGroups = Array.isArray(window.customReplyGroups) ? window.customReplyGroups : [];
+    var structuredGroups = getStructuredReplyGroups();
+    if (!structuredGroups.length) return [];
+
+    var validItems = new Set(allReplies.map(function(item) { return String(item || '').trim(); }).filter(Boolean));
+    var disabledItems = readDisabledReplyItems();
+    var disabledGroupItems = new Set();
+    allGroups.forEach(function(g) {
+        if (g && g.disabled && Array.isArray(g.items)) {
+            g.items.forEach(function(item) { disabledGroupItems.add(String(item || '').trim()); });
+        }
+    });
+
+    var seen = new Set();
+    var pool = [];
+    structuredGroups.forEach(function(g) {
+        var isPublic = g.scope === 'public';
+        var isSpeaker = String(g.speaker || '').trim() === speakerName;
+        if ((!isPublic && !isSpeaker) || g.disabled) return;
+        g.items.forEach(function(item) {
+            var text = String(item || '').trim();
+            if (!text || seen.has(text) || !validItems.has(text)) return;
+            if (disabledItems.has(text) || disabledGroupItems.has(text)) return;
+            seen.add(text);
+            pool.push(text);
+        });
+    });
+
+    return pool;
+}
+
+window.findGroupMemberByName = findGroupMemberByName;
+window.getDisplayGroupMemberForMessage = function(msg) {
+    if (!groupChatSettings.enabled || !msg || msg.sender === 'user') return null;
+    return findGroupMemberByName(msg.sender) || window.getGroupMemberForMessage(msg.id);
+};
+window.pickGroupChatReply = function() {
+    if (!groupChatSettings.enabled || !groupChatSettings.members || groupChatSettings.members.length === 0) return null;
+    if (!getStructuredReplyGroups().length) return null;
+    var candidates = groupChatSettings.members.map(function(member) {
+        return { member: member, pool: buildSpeakerReplyPool(member.name) };
+    }).filter(function(entry) {
+        return entry.pool && entry.pool.length > 0;
+    });
+    if (!candidates.length) return null;
+    var chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    return {
+        member: chosen.member,
+        pool: chosen.pool,
+        text: chosen.pool[Math.floor(Math.random() * chosen.pool.length)]
+    };
+};
 (function loadGroupAvatars() {
     if (!window.localforage) return;
     var members = groupChatSettings.members || [];
@@ -81,6 +166,12 @@ function saveGroupChatSettings() {
         });
     }
 }
+
+window.applyGroupChatSettings = function(nextSettings, shouldPersist) {
+    groupChatSettings = normalizeGroupChatSettings(nextSettings);
+    if (shouldPersist !== false) saveGroupChatSettings();
+    if (typeof updateGroupModeUI === 'function') updateGroupModeUI();
+};
 
 function renderGroupMembersList() {
     var list = document.getElementById('group-members-list');
@@ -167,6 +258,24 @@ document.addEventListener('DOMContentLoaded', function() {
         closeGroupChat.addEventListener('click', function() {
             var m = document.getElementById('group-chat-modal');
             if (m && typeof hideModal === 'function') hideModal(m);
+        });
+    }
+    var resetGroupPresetBtn = document.getElementById('reset-group-preset-btn');
+    if (resetGroupPresetBtn) {
+        resetGroupPresetBtn.addEventListener('click', async function() {
+            if (typeof window.applyBundledPreset !== 'function') {
+                if (typeof showNotification === 'function') showNotification('内置预设不可用', 'error');
+                return;
+            }
+            if (!confirm('将用仓库内置群聊预设覆盖当前字卡分组与群成员设置，不影响已有聊天记录。确定继续吗？')) return;
+            const ok = await window.applyBundledPreset(null, { force: true });
+            if (ok) {
+                if (typeof showNotification === 'function') showNotification('已恢复为内置群聊预设', 'success');
+                renderGroupMembersList();
+                updateGroupModeUI();
+            } else {
+                if (typeof showNotification === 'function') showNotification('重置失败，请稍后再试', 'error');
+            }
         });
     }
     setTimeout(updateGroupModeUI, 200);

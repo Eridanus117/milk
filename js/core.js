@@ -283,6 +283,18 @@ const loadData = async () => {
     try {
         settings = getDefaultSettings();
 
+        if (typeof window.applyBundledPresetIfNeeded === 'function') {
+            try {
+                await window.applyBundledPresetIfNeeded({
+                    localforage: localforage,
+                    getStorageKey: getStorageKey,
+                    appPrefix: APP_PREFIX
+                });
+            } catch (e) {
+                console.warn('[loadData] 内置预设初始化失败:', e);
+            }
+        }
+
         
         const results = await Promise.allSettled([
             localforage.getItem(getStorageKey('chatSettings')),
@@ -997,7 +1009,9 @@ function createMessageFragment(msg, prevMsg, nextMsg, lastSenderRef) {
         avatarDiv.style.marginTop = settings.inChatAvatarCustomOffset + 'px';
     }
 
-    const groupMember = (msg.sender !== 'user' && typeof getGroupMemberForMessage === 'function') ? getGroupMemberForMessage(msg.id) : null;
+    const groupMember = (msg.sender !== 'user' && typeof getDisplayGroupMemberForMessage === 'function')
+        ? getDisplayGroupMemberForMessage(msg)
+        : ((msg.sender !== 'user' && typeof getGroupMemberForMessage === 'function') ? getGroupMemberForMessage(msg.id) : null);
 
     if (settings.inChatAvatarEnabled) {
         const isSameSenderGroup = groupMember && lastSenderRef.current === 'group_' + (groupMember ? groupMember.name : '');
@@ -1044,7 +1058,7 @@ function createMessageFragment(msg, prevMsg, nextMsg, lastSenderRef) {
         if (!isSameSenderForName) {
             const nameLabel = document.createElement('div');
             nameLabel.className = 'group-sender-name';
-            nameLabel.textContent = settings.partnerName || msg.sender || '对方';
+            nameLabel.textContent = msg.sender || settings.partnerName || '对方';
             contentWrapper.appendChild(nameLabel);
         }
     }
@@ -1453,7 +1467,13 @@ if (!isBatchMode && type === 'normal') {
             const tiWrapper = document.getElementById('typing-indicator-wrapper');
             const tiLabel = document.getElementById('typing-indicator-label');
             const tiAvatar = document.getElementById('typing-indicator-avatar');
-            if (tiLabel) tiLabel.textContent = (settings.partnerName || '对方') + ' 正在输入';
+            if (tiLabel) {
+                const isGroupTyping = typeof groupChatSettings !== 'undefined'
+                    && groupChatSettings.enabled
+                    && groupChatSettings.members
+                    && groupChatSettings.members.length > 0;
+                tiLabel.textContent = isGroupTyping ? '群聊中有人正在输入' : (settings.partnerName || '对方') + ' 正在输入';
+            }
             if (tiWrapper) { 
                 positionTypingIndicator(); 
                 tiWrapper.style.display = 'block'; 
@@ -1588,20 +1608,31 @@ if (!isBatchMode && type === 'normal') {
             ro.observe(inputArea);
         })();
 
-        window.simulateReply = function() {
-            function showTypingIndicator() {
+window.simulateReply = function() {
+            function showTypingIndicator(member) {
                 if (!settings.typingIndicatorEnabled) return;
                 const tiWrapper = document.getElementById('typing-indicator-wrapper');
                 const tiLabel = document.getElementById('typing-indicator-label');
                 const tiAvatar = document.getElementById('typing-indicator-avatar');
-                if (tiLabel) tiLabel.textContent = (settings.partnerName || '对方') + ' 正在输入';
+                if (tiLabel) {
+                    tiLabel.textContent = member && member.name
+                        ? member.name + ' 正在输入'
+                        : (settings.partnerName || '对方') + ' 正在输入';
+                }
                 if (tiWrapper) { 
                     positionTypingIndicator(); 
                     tiWrapper.style.display = 'block'; 
                 }
                 if (tiAvatar) {
-                    const partnerImg = DOMElements.partner.avatar.querySelector('img');
-                    tiAvatar.innerHTML = partnerImg ? `<img src="${partnerImg.src}">` : '<i class="fas fa-user"></i>';
+                    if (member && member.avatar) {
+                        tiAvatar.innerHTML = `<img src="${member.avatar}">`;
+                    } else if (member && member.name) {
+                        const initials = member.name.charAt(0).toUpperCase();
+                        tiAvatar.innerHTML = `<div style="width:100%;height:100%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;border-radius:50%;">${initials}</div>`;
+                    } else {
+                        const partnerImg = DOMElements.partner.avatar.querySelector('img');
+                        tiAvatar.innerHTML = partnerImg ? `<img src="${partnerImg.src}">` : '<i class="fas fa-user"></i>';
+                    }
                 }
                 DOMElements.chatContainer.scrollTop = DOMElements.chatContainer.scrollHeight;
             }
@@ -1616,7 +1647,7 @@ if (!isBatchMode && type === 'normal') {
                 _updateReadReceiptsDOM(); throttledSaveData();
             }
 
-if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
+if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                 const currentPool = [
                     ...partnerPersonas
                 ];
@@ -1663,8 +1694,15 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                 return;
             }
 
+            const groupReplyPlan = [];
+            for (let i = 0; i < replyCount; i++) {
+                if (typeof window.pickGroupChatReply === 'function') groupReplyPlan.push(window.pickGroupChatReply());
+                else groupReplyPlan.push(null);
+            }
+
             // 确认有可用回复后再展示“正在输入中”，避免空转
-            showTypingIndicator();
+            const firstGroupMember = groupReplyPlan.find(plan => plan && plan.member)?.member || null;
+            showTypingIndicator(firstGroupMember);
             let delay = 0;
             const recentUserMsgs = settings.replyEnabled
                 ? messages.filter(m => m.sender === 'user' && m.text).slice(-10)
@@ -1674,14 +1712,21 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                 delay += settings.replyDelayMin + Math.random() * delayRange;
                 setTimeout(() => {
                     try {
+                    const plannedGroupReply = groupReplyPlan[i];
                     const replyPool = replyPoolOnce;
-                    // 被屏蔽或无效项直接换下一个，尽量保证每次都产出可用回复
                     let replyText = '';
-                    for (let t = 0; t < 6; t++) {
-                        const picked = replyPool[Math.floor(Math.random() * replyPool.length)];
-                        if (picked && String(picked).trim()) {
-                            replyText = String(picked).trim();
-                            break;
+                    let senderName = settings.partnerName || '对方';
+                    if (plannedGroupReply && plannedGroupReply.text) {
+                        replyText = String(plannedGroupReply.text).trim();
+                        senderName = plannedGroupReply.member?.name || senderName;
+                    } else {
+                        // 被屏蔽或无效项直接换下一个，尽量保证每次都产出可用回复
+                        for (let t = 0; t < 6; t++) {
+                            const picked = replyPool[Math.floor(Math.random() * replyPool.length)];
+                            if (picked && String(picked).trim()) {
+                                replyText = String(picked).trim();
+                                break;
+                            }
                         }
                     }
                     if (!replyText && i === replyCount - 1) {
@@ -1712,7 +1757,7 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
 
                     addMessage({
                         id: Date.now() + i,
-                        sender: settings.partnerName || '对方',
+                        sender: senderName,
                         text: finalText,
                         timestamp: new Date(),
                         status: 'received',
@@ -1724,7 +1769,7 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                         type: 'normal'
                     });
                     if (typeof window._sendPartnerNotification === 'function') {
-                        window._sendPartnerNotification(settings.partnerName || '对方', finalText);
+                        window._sendPartnerNotification(senderName, finalText);
                     }
                     playSound('message');
 
@@ -1733,7 +1778,7 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                         setTimeout(() => {
                             addMessage({
                                 id: Date.now() + i + 2000,
-                                sender: settings.partnerName || '对方',
+                                sender: senderName,
                                 text: '',
                                 timestamp: new Date(),
                                 image: randomSticker,
@@ -1744,7 +1789,7 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                             });
                             playSound('message');
                             if (typeof window._sendPartnerNotification === 'function') {
-                                window._sendPartnerNotification(settings.partnerName || '对方', '[表情]');
+                                window._sendPartnerNotification(senderName, '[表情]');
                             }
                         }, 400 + Math.random() * 600);
                     }
@@ -1753,7 +1798,7 @@ if (partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                         setTimeout(() => {
                             addMessage({
                                 id: Date.now() + i + 1000,
-                                sender: settings.partnerName || '对方',
+                                sender: senderName,
                                 text: separateEmoji,
                                 timestamp: new Date(),
                                 status: 'received',
@@ -2319,6 +2364,4 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(historyLoader);
     }
 });
-
-
 
