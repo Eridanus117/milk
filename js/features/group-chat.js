@@ -69,12 +69,89 @@ function readDisabledReplyItems() {
     }
 }
 
-function getReplyGroupTone(group) {
+var GROUP_CHAT_REPLY_RATIOS = {
+    public: 40,
+    role: 30,
+    intimate: 20,
+    link: 10
+};
+
+function getReplyGroupKind(group) {
     if (!group || typeof group !== 'object') return 'public';
+    var kind = String(group.kind || '').trim();
+    if (kind === 'public' || kind === 'role' || kind === 'intimate' || kind === 'link') return kind;
     if (group.scope === 'public') return 'public';
     var name = String(group.name || '').trim();
     if (/夜话|暧昧|撩拨|夜火/.test(name)) return 'intimate';
-    return 'speaker';
+    return 'role';
+}
+
+function pickRandomReply(items, usedTexts) {
+    if (!Array.isArray(items) || !items.length) return null;
+    var pool = items;
+    if (usedTexts && typeof usedTexts.has === 'function') {
+        var fresh = items.filter(function(item) { return !usedTexts.has(item); });
+        if (fresh.length) pool = fresh;
+    }
+    return pool[Math.floor(Math.random() * pool.length)] || null;
+}
+
+function getGroupChatRatioState() {
+    if (!window._lyskGroupReplyRatioState) {
+        window._lyskGroupReplyRatioState = {
+            total: 0,
+            counts: { public: 0, role: 0, intimate: 0, link: 0 }
+        };
+    }
+    return window._lyskGroupReplyRatioState;
+}
+
+function buildReplyKindPlan(count) {
+    var defs = [
+        { name: 'public', weight: GROUP_CHAT_REPLY_RATIOS.public },
+        { name: 'role', weight: GROUP_CHAT_REPLY_RATIOS.role },
+        { name: 'intimate', weight: GROUP_CHAT_REPLY_RATIOS.intimate },
+        { name: 'link', weight: GROUP_CHAT_REPLY_RATIOS.link }
+    ];
+    var state = getGroupChatRatioState();
+    var counts = Object.assign({ public: 0, role: 0, intimate: 0, link: 0 }, state.counts || {});
+    var plan = [];
+    var total = Number(state.total || 0);
+
+    while (plan.length < count) {
+        var stepTotal = total + plan.length + 1;
+        var ranked = defs.map(function(def) {
+            return {
+                name: def.name,
+                deficit: stepTotal * def.weight / 100 - (counts[def.name] || 0)
+            };
+        }).sort(function(a, b) {
+            if (b.deficit !== a.deficit) return b.deficit - a.deficit;
+            return Math.random() - 0.5;
+        });
+        var chosen = ranked[0].name;
+        plan.push(chosen);
+        counts[chosen] = (counts[chosen] || 0) + 1;
+    }
+
+    for (var index = plan.length - 1; index > 0; index--) {
+        var swapIndex = Math.floor(Math.random() * (index + 1));
+        var tmp = plan[index];
+        plan[index] = plan[swapIndex];
+        plan[swapIndex] = tmp;
+    }
+    return plan;
+}
+
+function updateGroupChatRatioState(kinds) {
+    if (!Array.isArray(kinds) || !kinds.length) return;
+    var state = getGroupChatRatioState();
+    if (!state.counts) state.counts = { public: 0, role: 0, intimate: 0, link: 0 };
+    kinds.forEach(function(kind) {
+        if (!kind) return;
+        state.counts[kind] = (state.counts[kind] || 0) + 1;
+        state.total = (state.total || 0) + 1;
+    });
 }
 
 function buildSpeakerReplyBuckets(speakerName) {
@@ -95,18 +172,19 @@ function buildSpeakerReplyBuckets(speakerName) {
     });
 
     var seen = new Set();
-    var buckets = { public: [], speaker: [], intimate: [] };
+    var buckets = { public: [], role: [], intimate: [], link: [] };
     structuredGroups.forEach(function(g) {
         var isPublic = g.scope === 'public';
         var isSpeaker = String(g.speaker || '').trim() === speakerName;
         if ((!isPublic && !isSpeaker) || g.disabled) return;
-        var tone = getReplyGroupTone(g);
+        var kind = getReplyGroupKind(g);
         g.items.forEach(function(item) {
             var text = String(item || '').trim();
             if (!text || seen.has(text) || !validItems.has(text)) return;
             if (disabledItems.has(text) || disabledGroupItems.has(text)) return;
             seen.add(text);
-            buckets[tone].push(text);
+            if (!buckets[kind]) buckets[kind] = [];
+            buckets[kind].push(text);
         });
     });
 
@@ -116,17 +194,23 @@ function buildSpeakerReplyBuckets(speakerName) {
 function pickWeightedReplyFromBuckets(buckets, options) {
     if (!buckets) return null;
     options = options || {};
-    var hour = new Date().getHours();
-    var isLateNight = hour >= 22 || hour < 4;
-    var weightedPools = [];
-
-    if (buckets.speaker && buckets.speaker.length) weightedPools.push({ items: buckets.speaker, weight: isLateNight ? 11 : 12 });
-    if (options.allowPublic !== false && buckets.public && buckets.public.length) weightedPools.push({ items: buckets.public, weight: 1 });
-    if (buckets.intimate && buckets.intimate.length) weightedPools.push({ items: buckets.intimate, weight: isLateNight ? 4 : 1 });
-
-    if (!weightedPools.length && buckets.public && buckets.public.length) {
-        weightedPools.push({ items: buckets.public, weight: 1 });
+    var preferredKind = String(options.preferredKind || '').trim();
+    var usedTexts = options.usedTexts || null;
+    if (preferredKind && buckets[preferredKind] && buckets[preferredKind].length) {
+        return {
+            kind: preferredKind,
+            text: pickRandomReply(buckets[preferredKind], usedTexts)
+        };
     }
+
+    var weightedPools = [
+        { kind: 'public', items: buckets.public, weight: GROUP_CHAT_REPLY_RATIOS.public },
+        { kind: 'role', items: buckets.role, weight: GROUP_CHAT_REPLY_RATIOS.role },
+        { kind: 'intimate', items: buckets.intimate, weight: GROUP_CHAT_REPLY_RATIOS.intimate },
+        { kind: 'link', items: buckets.link, weight: GROUP_CHAT_REPLY_RATIOS.link }
+    ].filter(function(entry) {
+        return Array.isArray(entry.items) && entry.items.length > 0;
+    });
 
     if (!weightedPools.length) return null;
 
@@ -135,13 +219,18 @@ function pickWeightedReplyFromBuckets(buckets, options) {
     for (var i = 0; i < weightedPools.length; i++) {
         roll -= weightedPools[i].weight;
         if (roll <= 0) {
-            var bucket = weightedPools[i].items;
-            return bucket[Math.floor(Math.random() * bucket.length)];
+            return {
+                kind: weightedPools[i].kind,
+                text: pickRandomReply(weightedPools[i].items, usedTexts)
+            };
         }
     }
 
-    var lastBucket = weightedPools[weightedPools.length - 1].items;
-    return lastBucket[Math.floor(Math.random() * lastBucket.length)];
+    var lastEntry = weightedPools[weightedPools.length - 1];
+    return {
+        kind: lastEntry.kind,
+        text: pickRandomReply(lastEntry.items, usedTexts)
+    };
 }
 
 function getGroupMemberAvatarRef(member, index) {
@@ -198,9 +287,10 @@ function getGroupReplyCandidates() {
         return { member: member, buckets: buildSpeakerReplyBuckets(member.name) };
     }).filter(function(entry) {
         return entry.buckets
-            && ((entry.buckets.speaker && entry.buckets.speaker.length)
+            && ((entry.buckets.role && entry.buckets.role.length)
                 || (entry.buckets.public && entry.buckets.public.length)
-                || (entry.buckets.intimate && entry.buckets.intimate.length));
+                || (entry.buckets.intimate && entry.buckets.intimate.length)
+                || (entry.buckets.link && entry.buckets.link.length));
     });
 }
 
@@ -225,15 +315,28 @@ window.buildGroupChatReplyPlan = function(count) {
         shuffled[j] = tmp;
     }
 
-    var publicSlot = Math.random() < 0.45 ? Math.floor(Math.random() * targetCount) : -1;
-    return shuffled.slice(0, targetCount).map(function(chosen, index) {
-        var text = pickWeightedReplyFromBuckets(chosen.buckets, { allowPublic: index === publicSlot });
+    var kindPlan = buildReplyKindPlan(targetCount);
+    var usedTexts = new Set();
+    var usedKinds = [];
+    var plan = shuffled.slice(0, targetCount).map(function(chosen, index) {
+        var preferredKind = kindPlan[index] || 'role';
+        var picked = pickWeightedReplyFromBuckets(chosen.buckets, {
+            preferredKind: preferredKind,
+            usedTexts: usedTexts
+        });
+        var text = picked && picked.text ? picked.text : '';
+        var actualKind = picked && picked.kind ? picked.kind : preferredKind;
+        if (text) usedTexts.add(text);
+        usedKinds.push(actualKind);
         return {
             member: chosen.member,
             buckets: chosen.buckets,
-            text: text || ''
+            replyKind: actualKind,
+            text: text
         };
     });
+    updateGroupChatRatioState(usedKinds);
+    return plan;
 };
 window.pickGroupChatReply = function() {
     var plan = window.buildGroupChatReplyPlan(1);
