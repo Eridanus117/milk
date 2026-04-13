@@ -17,6 +17,83 @@
         return out;
     }
 
+    function escapeXml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+    }
+
+    function toSvgDataUrl(svg) {
+        return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg.replace(/\s+/g, ' ').trim());
+    }
+
+    function makeBundledGroupAvatar(options) {
+        const palette = options.palette || {};
+        const bgFrom = palette.bgFrom || '#7A8CA5';
+        const bgTo = palette.bgTo || '#53657E';
+        const ring = palette.ring || '#F5F7FA';
+        const shade = palette.shade || '#FFFFFF';
+        const mark = escapeXml(options.mark || '?');
+        const title = escapeXml(options.title || '');
+        const subtitle = escapeXml(options.subtitle || '');
+        const svg = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="${title}">
+                <defs>
+                    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="${bgFrom}" />
+                        <stop offset="100%" stop-color="${bgTo}" />
+                    </linearGradient>
+                </defs>
+                <rect width="256" height="256" rx="128" fill="url(#bg)" />
+                <circle cx="186" cy="64" r="34" fill="${shade}" opacity="0.14" />
+                <circle cx="70" cy="194" r="48" fill="${shade}" opacity="0.10" />
+                <circle cx="128" cy="128" r="108" fill="none" stroke="${ring}" stroke-width="4" opacity="0.52" />
+                <path d="M56 176c18-26 46-40 72-40 34 0 54 12 72 32" fill="none" stroke="${ring}" stroke-width="6" stroke-linecap="round" opacity="0.24" />
+                <text x="128" y="54" text-anchor="middle" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#FFFFFF" opacity="0.92">${title}</text>
+                <text x="128" y="148" text-anchor="middle" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif" font-size="92" font-weight="700" fill="#FFFFFF">${mark}</text>
+                <text x="128" y="206" text-anchor="middle" font-family="'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif" font-size="15" fill="#FFFFFF" opacity="0.88">${subtitle}</text>
+            </svg>
+        `;
+        return toSvgDataUrl(svg);
+    }
+
+    const bundledGroupAvatars = {
+        gca_preset_li_maomao: makeBundledGroupAvatar({
+            title: '黎猫猫',
+            mark: '黎',
+            subtitle: '黎深',
+            palette: { bgFrom: '#98BDD7', bgTo: '#5B84A7', ring: '#EEF7FD', shade: '#F8FBFF' }
+        }),
+        gca_preset_shen_xingxing: makeBundledGroupAvatar({
+            title: '沈星星',
+            mark: '沈',
+            subtitle: '沈星回',
+            palette: { bgFrom: '#A8B8EC', bgTo: '#6F86CE', ring: '#F0F4FF', shade: '#FFFFFF' }
+        }),
+        gca_preset_qi_xiaoyu: makeBundledGroupAvatar({
+            title: '祁小煜',
+            mark: '祁',
+            subtitle: '祁煜',
+            palette: { bgFrom: '#F0AE8C', bgTo: '#C8685D', ring: '#FFF2EA', shade: '#FFF7F2' }
+        }),
+        gca_preset_chezige: makeBundledGroupAvatar({
+            title: '彻子哥',
+            mark: '彻',
+            subtitle: '秦彻',
+            palette: { bgFrom: '#A86059', bgTo: '#592631', ring: '#F6E0DF', shade: '#FFF6F6' }
+        }),
+        gca_preset_gege: makeBundledGroupAvatar({
+            title: '哥哥',
+            mark: '昼',
+            subtitle: '夏以昼',
+            palette: { bgFrom: '#E0B56E', bgTo: '#AD6746', ring: '#FFF3DA', shade: '#FFF9EF' }
+        })
+    };
+    window.LYSK_BUNDLED_GROUP_AVATARS = bundledGroupAvatars;
+
     const publicGreetings = [
         '在吗？',
         '今天过得怎么样？',
@@ -727,6 +804,35 @@
         }
     };
 
+    async function preserveExistingGroupAvatars(ctx, existingGroupChatSettings, nextGroupChatSettings) {
+        if (!ctx || !ctx.localforage || !existingGroupChatSettings || !Array.isArray(existingGroupChatSettings.members)) return;
+        if (!nextGroupChatSettings || !Array.isArray(nextGroupChatSettings.members) || !nextGroupChatSettings.members.length) return;
+
+        const existingByName = new Map();
+        const existingByIndex = [];
+        for (let index = 0; index < existingGroupChatSettings.members.length; index++) {
+            const member = existingGroupChatSettings.members[index] || {};
+            const ref = member.avatarRef || (member.id ? 'gca_' + member.id : 'gca_' + index);
+            let avatar = null;
+            try {
+                avatar = await ctx.localforage.getItem(ref);
+            } catch (e) {}
+            if (!avatar) continue;
+            existingByIndex[index] = avatar;
+            if (member.name && !existingByName.has(member.name)) existingByName.set(member.name, avatar);
+        }
+
+        for (let index = 0; index < nextGroupChatSettings.members.length; index++) {
+            const member = nextGroupChatSettings.members[index] || {};
+            const avatar = existingByName.get(member.name) || existingByIndex[index];
+            if (!avatar) continue;
+            const ref = member.avatarRef || (member.id ? 'gca_' + member.id : 'gca_' + index);
+            try {
+                await ctx.localforage.setItem(ref, avatar);
+            } catch (e) {}
+        }
+    }
+
     window.applyBundledPreset = async function (ctx, options) {
         const preset = window.LYSK_BUNDLED_PRESET;
         options = options || {};
@@ -779,9 +885,11 @@
                 await ctx.localforage.setItem(settingsKey, Object.assign({}, existingSettings || {}, preset.chatSettings));
             }
             if (preset.groupChatSettings) {
-                localStorage.setItem('groupChatSettings', JSON.stringify(cloneJson(preset.groupChatSettings)));
+                const nextGroupChatSettings = cloneJson(preset.groupChatSettings);
+                await preserveExistingGroupAvatars(ctx, existingGroupChatSettings, nextGroupChatSettings);
+                localStorage.setItem('groupChatSettings', JSON.stringify(nextGroupChatSettings));
                 if (typeof window.applyGroupChatSettings === 'function') {
-                    window.applyGroupChatSettings(preset.groupChatSettings, false);
+                    window.applyGroupChatSettings(nextGroupChatSettings, false);
                 }
             }
             try { localStorage.removeItem('disabledReplyItems'); } catch (e) {}

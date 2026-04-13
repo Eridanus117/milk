@@ -104,6 +104,53 @@ function buildSpeakerReplyPool(speakerName) {
     return pool;
 }
 
+function getGroupMemberAvatarRef(member, index) {
+    if (!member) return 'gca_' + index;
+    if (!member.avatarRef) member.avatarRef = member.id ? 'gca_' + member.id : 'gca_' + index;
+    return member.avatarRef;
+}
+
+function getBundledGroupAvatar(ref) {
+    var bundled = window.LYSK_BUNDLED_GROUP_AVATARS || {};
+    return ref && bundled[ref] ? bundled[ref] : null;
+}
+
+function hydrateGroupMemberAvatars() {
+    var members = groupChatSettings.members || [];
+    if (members.length === 0) {
+        if (typeof renderGroupMembersList === 'function') renderGroupMembersList();
+        return Promise.resolve([]);
+    }
+
+    function assignAvatar(member, index, avatar) {
+        var ref = getGroupMemberAvatarRef(member, index);
+        member.avatar = avatar || getBundledGroupAvatar(ref) || null;
+        return member.avatar;
+    }
+
+    if (!window.localforage) {
+        members.forEach(function(member, index) { assignAvatar(member, index, null); });
+        if (typeof renderGroupMembersList === 'function') renderGroupMembersList();
+        if (typeof updateUI === 'function') updateUI();
+        return Promise.resolve(members);
+    }
+
+    var promises = members.map(function(member, index) {
+        var ref = getGroupMemberAvatarRef(member, index);
+        return localforage.getItem(ref).then(function(avatar) {
+            assignAvatar(member, index, avatar);
+        }).catch(function() {
+            assignAvatar(member, index, null);
+        });
+    });
+
+    return Promise.all(promises).then(function() {
+        if (typeof renderGroupMembersList === 'function') renderGroupMembersList();
+        if (typeof updateUI === 'function') updateUI();
+        return members;
+    });
+}
+
 function getGroupReplyCandidates() {
     if (!groupChatSettings.enabled || !groupChatSettings.members || groupChatSettings.members.length === 0) return [];
     if (!getStructuredReplyGroups().length) return [];
@@ -147,20 +194,7 @@ window.pickGroupChatReply = function() {
     var plan = window.buildGroupChatReplyPlan(1);
     return plan.length ? plan[0] : null;
 };
-(function loadGroupAvatars() {
-    if (!window.localforage) return;
-    var members = groupChatSettings.members || [];
-    if (members.length === 0) return;
-    var promises = members.map(function(m, i) {
-        var ref = m.avatarRef || (m.id ? 'gca_' + m.id : 'gca_' + i);
-        return localforage.getItem(ref).then(function(avatar) {
-            m.avatar = avatar || null;
-        }).catch(function() { m.avatar = null; });
-    });
-    Promise.all(promises).then(function() {
-        if (typeof renderGroupMembersList === 'function') renderGroupMembersList();
-    });
-})();
+hydrateGroupMemberAvatars();
 var _groupMemberAvatarDataUrl = null;
 
 function saveGroupChatSettings() {
@@ -193,6 +227,7 @@ window.applyGroupChatSettings = function(nextSettings, shouldPersist) {
     groupChatSettings = normalizeGroupChatSettings(nextSettings);
     if (shouldPersist !== false) saveGroupChatSettings();
     if (typeof updateGroupModeUI === 'function') updateGroupModeUI();
+    hydrateGroupMemberAvatars();
 };
 
 function renderGroupMembersList() {
