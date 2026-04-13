@@ -104,26 +104,48 @@ function buildSpeakerReplyPool(speakerName) {
     return pool;
 }
 
+function getGroupReplyCandidates() {
+    if (!groupChatSettings.enabled || !groupChatSettings.members || groupChatSettings.members.length === 0) return [];
+    if (!getStructuredReplyGroups().length) return [];
+    return groupChatSettings.members.map(function(member) {
+        return { member: member, pool: buildSpeakerReplyPool(member.name) };
+    }).filter(function(entry) {
+        return entry.pool && entry.pool.length > 0;
+    });
+}
+
 window.findGroupMemberByName = findGroupMemberByName;
 window.getDisplayGroupMemberForMessage = function(msg) {
     if (!groupChatSettings.enabled || !msg || msg.sender === 'user') return null;
     return findGroupMemberByName(msg.sender) || window.getGroupMemberForMessage(msg.id);
 };
-window.pickGroupChatReply = function() {
-    if (!groupChatSettings.enabled || !groupChatSettings.members || groupChatSettings.members.length === 0) return null;
-    if (!getStructuredReplyGroups().length) return null;
-    var candidates = groupChatSettings.members.map(function(member) {
-        return { member: member, pool: buildSpeakerReplyPool(member.name) };
-    }).filter(function(entry) {
-        return entry.pool && entry.pool.length > 0;
+window.buildGroupChatReplyPlan = function(count) {
+    var candidates = getGroupReplyCandidates();
+    if (!candidates.length) return [];
+
+    var targetCount = parseInt(count, 10);
+    if (!Number.isFinite(targetCount) || targetCount < 1) targetCount = 1;
+    targetCount = Math.min(targetCount, candidates.length);
+
+    var shuffled = candidates.slice();
+    for (var i = shuffled.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = shuffled[i];
+        shuffled[i] = shuffled[j];
+        shuffled[j] = tmp;
+    }
+
+    return shuffled.slice(0, targetCount).map(function(chosen) {
+        return {
+            member: chosen.member,
+            pool: chosen.pool,
+            text: chosen.pool[Math.floor(Math.random() * chosen.pool.length)]
+        };
     });
-    if (!candidates.length) return null;
-    var chosen = candidates[Math.floor(Math.random() * candidates.length)];
-    return {
-        member: chosen.member,
-        pool: chosen.pool,
-        text: chosen.pool[Math.floor(Math.random() * chosen.pool.length)]
-    };
+};
+window.pickGroupChatReply = function() {
+    var plan = window.buildGroupChatReplyPlan(1);
+    return plan.length ? plan[0] : null;
 };
 (function loadGroupAvatars() {
     if (!window.localforage) return;

@@ -1670,7 +1670,14 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                 return;
             }
 
-            const replyCount = Math.random() < 0.75 ? 1: (Math.random() < 0.95 ? 2: 3);
+            const isGroupReplyMode =
+                typeof groupChatSettings !== 'undefined' &&
+                groupChatSettings.enabled &&
+                Array.isArray(groupChatSettings.members) &&
+                groupChatSettings.members.length > 0;
+            let replyCount = isGroupReplyMode
+                ? Math.min(groupChatSettings.members.length, 3 + Math.floor(Math.random() * 3))
+                : (Math.random() < 0.75 ? 1 : (Math.random() < 0.95 ? 2 : 3));
             if (!customReplies || customReplies.length === 0) {
                 showNotification('回复库为空，请先到「自定义回复」中添加内容', 'info', 3500);
                 return;
@@ -1694,10 +1701,16 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                 return;
             }
 
-            const groupReplyPlan = [];
-            for (let i = 0; i < replyCount; i++) {
-                if (typeof window.pickGroupChatReply === 'function') groupReplyPlan.push(window.pickGroupChatReply());
-                else groupReplyPlan.push(null);
+            let groupReplyPlan = [];
+            if (isGroupReplyMode && typeof window.buildGroupChatReplyPlan === 'function') {
+                groupReplyPlan = window.buildGroupChatReplyPlan(replyCount);
+                if (groupReplyPlan.length) replyCount = groupReplyPlan.length;
+            }
+            if (!groupReplyPlan.length) {
+                for (let i = 0; i < replyCount; i++) {
+                    if (typeof window.pickGroupChatReply === 'function') groupReplyPlan.push(window.pickGroupChatReply());
+                    else groupReplyPlan.push(null);
+                }
             }
 
             // 确认有可用回复后再展示“正在输入中”，避免空转
@@ -2364,4 +2377,3 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(historyLoader);
     }
 });
-
