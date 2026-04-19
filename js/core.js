@@ -1245,7 +1245,7 @@ const addMessage = (message) => {
     // --- Append new message ---
     let lastSenderRef = { current: null };
     if (prevMsg) {
-        const prevGroupMember = (prevMsg.sender !== 'user' && typeof getGroupMemberForMessage === 'function') ? getGroupMemberForMessage(prevMsg.id) : null;
+        const prevGroupMember = (prevMsg.sender !== 'user' && typeof getDisplayGroupMemberForMessage === 'function') ? getDisplayGroupMemberForMessage(prevMsg) : null;
         lastSenderRef.current = prevGroupMember ? ('group_' + prevGroupMember.name) : prevMsg.sender;
     }
     
@@ -1765,6 +1765,26 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                                 : replyText + ' ' + emoji;
                         } else {
                             separateEmoji = emoji;
+                        }
+                    }
+
+                    // Update typing indicator to reflect current speaker in group chat
+                    if (typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled && settings.typingIndicatorEnabled) {
+                        const currentMember = plannedGroupReply?.member || null;
+                        const tiLabel = document.getElementById('typing-indicator-label');
+                        const tiAvatar = document.getElementById('typing-indicator-avatar');
+                        if (tiLabel) {
+                            tiLabel.textContent = currentMember && currentMember.name
+                                ? currentMember.name + ' 正在输入'
+                                : (settings.partnerName || '对方') + ' 正在输入';
+                        }
+                        if (tiAvatar && currentMember) {
+                            if (currentMember.avatar) {
+                                tiAvatar.innerHTML = `<img src="${currentMember.avatar}">`;
+                            } else {
+                                const initials = currentMember.name.charAt(0).toUpperCase();
+                                tiAvatar.innerHTML = `<div style="width:100%;height:100%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;border-radius:50%;">${initials}</div>`;
+                            }
                         }
                     }
 
