@@ -67,6 +67,9 @@
   - `主动发消息` 与 `恢复` 的语义
   - 版本更新链路
   - 当前最值得做的收口型重构
+- 配套材料：
+  - [docs/regression-checklist.md](/Users/a123/Documents/milk/docs/regression-checklist.md)
+  - [docs/refactor-backlog.md](/Users/a123/Documents/milk/docs/refactor-backlog.md)
 
 ## 发布前最小步骤
 
