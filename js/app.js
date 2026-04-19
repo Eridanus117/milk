@@ -58,6 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             safeAwait(initializeRandomUI?.()),
             safeAwait(initMusicPlayer?.())
         ]);
+        await safeAwait(updateBuildInfoState?.({ silent: true }));
 
         setInterval(checkStatusChange, 60000);
 
@@ -115,6 +116,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 } catch (e) {
                     console.warn('[visibilitychange] 恢复备份失败:', e);
+                }
+                try {
+                    if (typeof updateBuildInfoState === 'function') updateBuildInfoState({ silent: true });
+                } catch (e) {
+                    console.warn('[visibilitychange] 检查新版本失败:', e);
                 }
             }
         });

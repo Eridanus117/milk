@@ -16,11 +16,18 @@
     <link rel="icon" type="image/png" sizes="192x192" href="https://file.youtochat.com/images/20260216/1771224856844_qdqqd.jpeg">
     <link rel="apple-touch-icon" href="https://file.youtochat.com/images/20260216/1771224856844_qdqqd.jpeg">
     <meta name="apple-mobile-web-app-title" content="ʚ𝑳𝑶𝑽𝑬ɞ">
+    <script>
+        window.__BUILD_INFO__ = {
+            version: '2026.04.19',
+            buildTime: '2026-04-19T10:30:00-07:00',
+            assetVersion: '20260419-1'
+        };
+    </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/styles.css?v=20260419-1">
 
     <style id="css-live-preview-style"></style>
 </head>
@@ -195,6 +202,7 @@
                 </div>
             </div>
             <div class="header-actions">
+                <button id="chat-mode-btn" class="action-btn" title="聊天模式"><i class="fas fa-compass"></i></button>
                 <button id="session-manager-btn" class="action-btn" title="会话管理"><i class="fas fa-comments"></i></button>
                 <button id="group-chat-btn" class="action-btn" title="群聊设置"><i class="fas fa-users"></i></button>
                 <button id="daily-greeting-btn" class="action-btn" title="今日公告" onclick="reopenDailyGreeting()"><i class="fas fa-newspaper"></i></button>
@@ -598,6 +606,21 @@
     </div>
 </div>
 
+<div class="modal" id="chat-mode-modal" style="z-index:2150;">
+    <div class="modal-content" style="max-width:360px;">
+        <div class="modal-title">
+            <i class="fas fa-compass"></i><span>聊天模式</span>
+        </div>
+        <div style="font-size:12px;color:var(--text-secondary);margin:-4px 0 12px;">
+            在群聊和五个角色单聊之间切换，聊天记录会按入口分别保存。
+        </div>
+        <div id="chat-mode-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+        <div class="modal-buttons">
+            <button class="modal-btn modal-btn-secondary" id="close-chat-mode">关闭</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="group-member-edit-modal" style="z-index:2200;">
     <div class="modal-content" style="max-width:320px;">
         <div class="modal-title">
@@ -646,6 +669,25 @@
                 <div class="settings-card" id="data-settings">
                     <i class="fas fa-database"></i>
                     <span>数据管理</span>
+                </div>
+            </div>
+            <div class="settings-section" style="margin-top:16px;">
+                <div class="settings-section-title"><i class="fas fa-code-branch"></i>版本与更新</div>
+                <div style="background:var(--primary-bg);border:1px solid var(--border-color);border-radius:14px;padding:14px 15px;">
+                    <div style="display:flex;justify-content:space-between;gap:16px;font-size:13px;margin-bottom:8px;">
+                        <span style="color:var(--text-secondary);">构建版本</span>
+                        <strong id="build-version" style="color:var(--text-primary);font-weight:600;">-</strong>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;gap:16px;font-size:13px;margin-bottom:12px;">
+                        <span style="color:var(--text-secondary);">构建时间</span>
+                        <span id="build-time" style="color:var(--text-primary);text-align:right;">-</span>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                        <span id="update-status-text" style="font-size:12px;color:var(--text-secondary);line-height:1.5;">正在读取版本信息…</span>
+                        <button class="modal-btn modal-btn-primary" id="check-update-btn" style="padding:8px 14px;font-size:12px;white-space:nowrap;">
+                            <i class="fas fa-rotate"></i> 检查更新
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -2219,27 +2261,27 @@
 
 <div id="dg-editor-modal" style="display:none;"></div>
     <!-- == 核心层 == -->
-    <script src="js/config.js"></script>
-    <script src="js/utils.js"></script>
-    <script src="js/backup-engine.js"></script>
-    <script src="js/state.js"></script>
-    <script src="js/presets.js"></script>
-    <script src="js/core.js"></script>
+    <script src="js/config.js?v=20260419-1"></script>
+    <script src="js/utils.js?v=20260419-1"></script>
+    <script src="js/backup-engine.js?v=20260419-1"></script>
+    <script src="js/state.js?v=20260419-1"></script>
+    <script src="js/presets.js?v=20260419-1"></script>
+    <script src="js/core.js?v=20260419-1"></script>
 
     <!-- == 功能模块 == -->
-    <script src="js/features/mood.js"></script>
-    <script src="js/features/envelope.js"></script>
-    <script src="js/features/reply-library.js"></script>
-    <script src="js/features/theme-editor.js"></script>
-    <script src="js/features/group-chat.js"></script>
-    <script src="js/features/call.js"></script>
+    <script src="js/features/mood.js?v=20260419-1"></script>
+    <script src="js/features/envelope.js?v=20260419-1"></script>
+    <script src="js/features/reply-library.js?v=20260419-1"></script>
+    <script src="js/features/theme-editor.js?v=20260419-1"></script>
+    <script src="js/features/group-chat.js?v=20260419-1"></script>
+    <script src="js/features/call.js?v=20260419-1"></script>
 
     <!-- == 合并模块 == -->
-    <script src="js/games.js"></script> 
-    <script src="js/features.js"></script> 
-    <script src="js/data.js"></script>
-    <script src="js/onboarding.js"></script> 
-    <script src="js/listeners.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/games.js?v=20260419-1"></script> 
+    <script src="js/features.js?v=20260419-1"></script> 
+    <script src="js/data.js?v=20260419-1"></script>
+    <script src="js/onboarding.js?v=20260419-1"></script> 
+    <script src="js/listeners.js?v=20260419-1"></script>
+    <script src="js/app.js?v=20260419-1"></script>
 </body>
 </html>

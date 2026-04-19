@@ -405,12 +405,47 @@ fileInput.addEventListener('change', function(e) {
                 settings.isDarkMode = !settings.isDarkMode; throttledSaveData(); updateUI(); showNotification(`已切换到${settings.isDarkMode ? '夜': '昼'}模式`,
                     'success');
             });
+            if (DOMElements.chatModeModal && DOMElements.chatModeModal.openBtn) {
+                DOMElements.chatModeModal.openBtn.addEventListener('click', () => {
+                    if (typeof renderChatModeList === 'function') renderChatModeList();
+                    showModal(DOMElements.chatModeModal.modal);
+                });
+            }
+            if (DOMElements.chatModeModal && DOMElements.chatModeModal.closeBtn) {
+                DOMElements.chatModeModal.closeBtn.addEventListener('click', () => {
+                    hideModal(DOMElements.chatModeModal.modal);
+                });
+            }
+            if (DOMElements.chatModeModal && DOMElements.chatModeModal.list) {
+                DOMElements.chatModeModal.list.addEventListener('click', async (e) => {
+                    const target = e.target.closest('[data-session-id]');
+                    if (!target) return;
+                    const sessionId = target.dataset.sessionId;
+                    if (!sessionId || sessionId === SESSION_ID) {
+                        hideModal(DOMElements.chatModeModal.modal);
+                        return;
+                    }
+                    const ok = await window.switchToSession(sessionId);
+                    if (ok) hideModal(DOMElements.chatModeModal.modal);
+                });
+            }
             DOMElements.settingsModal.settingsBtn.addEventListener('click', () => {
+                if (typeof renderBuildInfoPanel === 'function') renderBuildInfoPanel();
                 showModal(DOMElements.settingsModal.modal);
             });
             DOMElements.favoritesModal.favoritesBtn.addEventListener('click', () => {
                 showModal(document.getElementById('group-chat-modal'));
             });
+            const checkUpdateBtn = document.getElementById('check-update-btn');
+            if (checkUpdateBtn) {
+                checkUpdateBtn.addEventListener('click', async () => {
+                    if (buildInfoState && buildInfoState.updateAvailable) {
+                        await applyPendingBuildUpdate();
+                        return;
+                    }
+                    await updateBuildInfoState({ silent: false });
+                });
+            }
 
 
 window.setReadReceiptStyle = function(style) {
@@ -1479,6 +1514,10 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
 
             if (e.target.closest('.rename')) {
                 const session = sessionList.find(s => s.id === sessionId);
+                if (session && session.systemChatKey) {
+                    showNotification('系统聊天入口不支持重命名', 'warning');
+                    return;
+                }
                 const newName = prompt('输入新的会话名称:', session.name);
                 if (newName && newName.trim()) {
                     session.name = newName.trim();
@@ -1487,6 +1526,11 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                     showNotification('会话已重命名', 'success');
                 }
             } else if (e.target.closest('.delete')) {
+                const session = sessionList.find(s => s.id === sessionId);
+                if (session && session.systemChatKey) {
+                    showNotification('系统聊天入口不能删除', 'warning');
+                    return;
+                }
                 if (sessionList.length <= 1) {
                     showNotification('无法删除最后一个会话', 'warning');
                     return;
@@ -1513,8 +1557,7 @@ localforage.keys().then(keys => {
 if (sessionId === currentSessionId) {
     const newCurrentId = sessionList[0].id;
     localforage.setItem(`${APP_PREFIX}customThemes`, customThemes);
-    window.location.hash = newCurrentId;
-    window.location.reload();
+    window.switchToSession(newCurrentId);
 } else {
     renderSessionList();
     showNotification('会话已删除', 'success');
@@ -1523,10 +1566,9 @@ if (sessionId === currentSessionId) {
             } else {
 
                 if (sessionId !== SESSION_ID) {
-                    if (confirm('切换会话将刷新页面，确定要继续吗？')) {
-                        window.location.hash = sessionId;
-                        window.location.reload();
-                    }
+                    window.switchToSession(sessionId).then((ok) => {
+                        if (ok) hideModal(DOMElements.sessionModal.modal);
+                    });
                 }
             }
         });

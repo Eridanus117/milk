@@ -54,6 +54,11 @@ function findGroupMemberByName(name) {
     return groupChatSettings.members.find(function(m) { return m && m.name === name; }) || null;
 }
 
+function findGroupMemberById(id) {
+    if (!id || !groupChatSettings.members || groupChatSettings.members.length === 0) return null;
+    return groupChatSettings.members.find(function(m) { return m && m.id === id; }) || null;
+}
+
 function getStructuredReplyGroups() {
     return (window.customReplyGroups || []).filter(function(g) {
         return g && Array.isArray(g.items) && (g.scope === 'public' || (typeof g.speaker === 'string' && g.speaker.trim()));
@@ -295,6 +300,11 @@ function getGroupReplyCandidates() {
 }
 
 window.findGroupMemberByName = findGroupMemberByName;
+window.getGroupMemberById = findGroupMemberById;
+window.getGroupMemberAvatar = function(member) {
+    if (!member) return null;
+    return member.avatar || getBundledGroupAvatar(getGroupMemberAvatarRef(member)) || null;
+};
 window.getDisplayGroupMemberForMessage = function(msg) {
     if (!groupChatSettings.enabled || !msg || msg.sender === 'user') return null;
     return findGroupMemberByName(msg.sender) || window.getGroupMemberForMessage(msg.id);
@@ -341,6 +351,21 @@ window.buildGroupChatReplyPlan = function(count) {
 window.pickGroupChatReply = function() {
     var plan = window.buildGroupChatReplyPlan(1);
     return plan.length ? plan[0] : null;
+};
+window.pickDirectRoleReply = function(roleId) {
+    var member = findGroupMemberById(roleId);
+    if (!member) return null;
+    var buckets = buildSpeakerReplyBuckets(member.name);
+    if (!buckets) return null;
+    var picked = pickWeightedReplyFromBuckets(buckets, { preferredKind: 'role' });
+    if (!picked || !picked.text) picked = pickWeightedReplyFromBuckets(buckets, {});
+    if (!picked || !picked.text) return { member: member, buckets: buckets, replyKind: 'public', text: '' };
+    return {
+        member: member,
+        buckets: buckets,
+        replyKind: picked.kind || 'role',
+        text: picked.text
+    };
 };
 hydrateGroupMemberAvatars();
 var _groupMemberAvatarDataUrl = null;
@@ -404,19 +429,20 @@ function updateGroupModeUI() {
     var status = document.getElementById('group-mode-status');
     var displaySection = document.getElementById('group-display-section');
     var membersSection = document.getElementById('group-members-section');
+    var isGroupMode = typeof window.isGroupChatMode === 'function' ? window.isGroupChatMode() : !!groupChatSettings.enabled;
     if (!pill) return;
-    if (groupChatSettings.enabled) {
+    if (isGroupMode) {
         pill.style.background = 'var(--accent-color)';
         knob.style.left = '22px';
-        status.textContent = '已开启 — 收到的消息随机显示成员';
+        status.textContent = '当前为群聊模式';
         displaySection.style.display = 'block';
         membersSection.style.display = 'block';
     } else {
         pill.style.background = 'var(--border-color)';
         knob.style.left = '3px';
-        status.textContent = '已关闭 — 点击开启';
-        displaySection.style.display = 'none';
-        membersSection.style.display = 'none';
+        status.textContent = '当前为单聊模式 — 点击切回群聊';
+        displaySection.style.display = 'block';
+        membersSection.style.display = 'block';
     }
     var avatarPill = document.getElementById('group-show-avatar-pill');
     var avatarKnob = document.getElementById('group-show-avatar-knob');
@@ -436,10 +462,14 @@ function updateGroupModeUI() {
 document.addEventListener('DOMContentLoaded', function() {
     var groupModeToggle = document.getElementById('group-mode-toggle');
     if (groupModeToggle) {
-        groupModeToggle.addEventListener('click', function() {
-            groupChatSettings.enabled = !groupChatSettings.enabled;
-            saveGroupChatSettings();
-            updateGroupModeUI();
+        groupModeToggle.addEventListener('click', async function() {
+            if (typeof window.isGroupChatMode === 'function' && window.isGroupChatMode()) {
+                if (typeof showNotification === 'function') showNotification('当前已经是群聊模式', 'info', 1500);
+                return;
+            }
+            if (typeof window.switchSystemChatMode === 'function') {
+                await window.switchSystemChatMode('group');
+            }
         });
     }
     var showAvatarToggle = document.getElementById('group-show-avatar-toggle');

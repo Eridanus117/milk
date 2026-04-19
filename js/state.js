@@ -7,6 +7,12 @@
         let SESSION_ID = null;
         let autoSendTimer = null; 
         let sessionList = [];
+        let chatModeState = { mode: 'group', activeRoleId: null };
+        let buildInfoState = {
+            current: window.__BUILD_INFO__ || null,
+            remote: null,
+            updateAvailable: false
+        };
         let messages = [];
         let settings = {};
         let partnerPersonas = []; 
@@ -102,6 +108,12 @@
                 favoritesBtn: document.getElementById('group-chat-btn'),
                 list: document.getElementById('favorites-list'),
                 cancel: document.getElementById('close-stats')
+            },
+            chatModeModal: {
+                modal: document.getElementById('chat-mode-modal'),
+                openBtn: document.getElementById('chat-mode-btn'),
+                list: document.getElementById('chat-mode-list'),
+                closeBtn: document.getElementById('close-chat-mode')
             },
             statsModal: {
                 modal: document.getElementById('stats-modal'),

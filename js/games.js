@@ -151,18 +151,27 @@ function renderStatsContent() {
                 listContainer.innerHTML = '<div class="stats-empty" style="padding: 20px 0;"><p>还没有会话</p></div>';
                 return;
             }
-            listContainer.innerHTML = sessionList.map(session => `
+            listContainer.innerHTML = sessionList.map(session => {
+            const isSystemChat = !!session.systemChatKey;
+            const chatTag = isSystemChat
+                ? `<span style="font-size:10px;color:var(--accent-color);background:rgba(var(--accent-color-rgb),0.12);padding:2px 6px;border-radius:999px;font-weight:600;">${session.systemChatType === 'group' ? '系统群聊' : '系统单聊'}</span>`
+                : '';
+            const actionHtml = isSystemChat
+                ? `<span style="font-size:11px;color:var(--text-secondary);">受保护</span>`
+                : `<button class="session-action-btn rename" title="重命名"><i class="fas fa-pen"></i></button>
+            <button class="session-action-btn delete" title="删除"><i class="fas fa-trash"></i></button>`;
+            return `
             <div class="session-item ${session.id === SESSION_ID ? 'active': ''}" data-id="${session.id}">
             <div class="session-info">
-            <div class="session-name">${session.name}</div>
+            <div class="session-name" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${session.name}${chatTag}</div>
             <div class="session-meta">创建于 ${new Date(session.createdAt).toLocaleDateString()}</div>
             </div>
             <div class="session-actions">
-            <button class="session-action-btn rename" title="重命名"><i class="fas fa-pen"></i></button>
-            <button class="session-action-btn delete" title="删除"><i class="fas fa-trash"></i></button>
+            ${actionHtml}
             </div>
             </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
 

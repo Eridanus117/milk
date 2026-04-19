@@ -57,3 +57,42 @@
 - 链接语境单独维护，不强行写成角色口吻
 - 角色专属句优先保证口吻稳定
 - 暧昧内容保留在单独分层，不直接稀释日常群聊体验
+
+## 发布前最小步骤
+
+建议每次准备提交并推送前，至少按这个顺序做一遍：
+
+1. 更新构建元信息
+   - 运行 `scripts/update-build-meta.sh`
+   - 如需显式指定版本和资源版本：`scripts/update-build-meta.sh 2026.04.19 20260419-2`
+2. 跑一遍无头冒烟
+   - 运行 `scripts/smoke-test.sh`
+   - 默认会：
+     - 本地起一个静态服务
+     - 自动走完 `splash -> 声明 -> 引导 -> 今日公告`
+     - 校验聊天模式入口、6 个系统聊天、版本信息显示
+3. 检查本次 diff
+   - 至少看 `index.html`
+   - 确认 `build-info.json`
+   - 确认这次改动涉及的 `js/` 文件
+4. 再提交并推送
+   - `git status`
+   - `git add ...`
+   - `git commit`
+   - `git push`
+
+如果你的远端部署依赖静态资源缓存，请确保：
+
+- `index.html` 已带最新 `?v=<assetVersion>`
+- `build-info.json` 已同步到远端
+- 线上 `index.html` 最好使用 `no-cache`
+- 线上 `build-info.json` 最好使用 `no-store`
+
+## 冒烟脚本
+
+- 执行：`scripts/smoke-test.sh`
+- 可选环境变量：
+  - `PORT=4174 scripts/smoke-test.sh`
+  - `SCREENSHOT_PATH=/tmp/milk-check.png scripts/smoke-test.sh`
+
+脚本成功时会输出一份 JSON 结果，并生成截图，默认截图路径是 `/tmp/milk-smoke.png`。

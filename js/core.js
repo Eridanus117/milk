@@ -190,6 +190,492 @@ autoSendInterval: 5,
             };
         }
 
+        function normalizeChatModeState(saved) {
+            if (!saved || typeof saved !== 'object') return { mode: 'group', activeRoleId: null };
+            const mode = saved.mode === 'dm' ? 'dm' : 'group';
+            const activeRoleId = typeof saved.activeRoleId === 'string' && saved.activeRoleId.trim()
+                ? saved.activeRoleId.trim()
+                : null;
+            return {
+                mode: mode,
+                activeRoleId: mode === 'dm' ? activeRoleId : null
+            };
+        }
+
+        function getChatModeStateKey() {
+            return `${APP_PREFIX}chatModeState`;
+        }
+
+        function makeSessionId() {
+            return Date.now().toString(36) + Math.random().toString(36).slice(2);
+        }
+
+        function getSystemChatDefinitions() {
+            const preset = window.LYSK_BUNDLED_PRESET || {};
+            const presetChatName = (preset.chatSettings && preset.chatSettings.partnerName) || '深空群聊';
+            const rawMembers = (typeof groupChatSettings !== 'undefined' && Array.isArray(groupChatSettings.members) && groupChatSettings.members.length)
+                ? groupChatSettings.members
+                : ((preset.groupChatSettings && Array.isArray(preset.groupChatSettings.members)) ? preset.groupChatSettings.members : []);
+            const seen = new Set();
+            const members = rawMembers.map(function(member, index) {
+                if (!member) return null;
+                const roleId = String(member.id || ('group_member_' + index)).trim();
+                if (!roleId || seen.has(roleId)) return null;
+                seen.add(roleId);
+                return {
+                    key: 'dm:' + roleId,
+                    roleId: roleId,
+                    type: 'dm',
+                    name: member.name || ('成员 ' + (index + 1)),
+                    member: member
+                };
+            }).filter(Boolean);
+
+            return [
+                {
+                    key: 'group',
+                    type: 'group',
+                    name: presetChatName,
+                    member: null
+                }
+            ].concat(members);
+        }
+
+        function getCurrentSessionMeta() {
+            return Array.isArray(sessionList) ? sessionList.find(function(session) {
+                return session && session.id === SESSION_ID;
+            }) || null : null;
+        }
+
+        function getSessionById(sessionId) {
+            return Array.isArray(sessionList) ? sessionList.find(function(session) {
+                return session && session.id === sessionId;
+            }) || null : null;
+        }
+
+        function getGroupMemberByRoleId(roleId) {
+            if (!roleId) return null;
+            if (typeof window.getGroupMemberById === 'function') {
+                return window.getGroupMemberById(roleId);
+            }
+            if (typeof findGroupMemberByName === 'function') {
+                const defs = getSystemChatDefinitions();
+                const found = defs.find(function(def) { return def.roleId === roleId; });
+                if (found && found.member && found.member.name) return findGroupMemberByName(found.member.name);
+            }
+            return null;
+        }
+
+        function getMemberAvatarSrc(member) {
+            if (!member) return null;
+            if (member.avatar) return member.avatar;
+            if (typeof window.getGroupMemberAvatar === 'function') {
+                return window.getGroupMemberAvatar(member);
+            }
+            return null;
+        }
+
+        function getCurrentBuildInfo() {
+            return Object.assign({
+                version: 'dev',
+                buildTime: null,
+                assetVersion: 'dev'
+            }, window.__BUILD_INFO__ || {});
+        }
+
+        function formatBuildTime(buildTime) {
+            if (!buildTime) return '未知';
+            const date = new Date(buildTime);
+            if (Number.isNaN(date.getTime())) return String(buildTime);
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+
+        async function fetchRemoteBuildInfo() {
+            const response = await fetch('build-info.json?t=' + Date.now(), { cache: 'no-store' });
+            if (!response.ok) throw new Error('版本信息读取失败: ' + response.status);
+            return response.json();
+        }
+
+        function renderBuildInfoPanel() {
+            const current = getCurrentBuildInfo();
+            const versionEl = document.getElementById('build-version');
+            const timeEl = document.getElementById('build-time');
+            const statusEl = document.getElementById('update-status-text');
+            const buttonEl = document.getElementById('check-update-btn');
+            if (versionEl) versionEl.textContent = current.version || 'dev';
+            if (timeEl) timeEl.textContent = formatBuildTime(current.buildTime);
+            if (statusEl) {
+                if (buildInfoState.updateAvailable && buildInfoState.remote) {
+                    statusEl.textContent = '发现新版本 ' + (buildInfoState.remote.version || buildInfoState.remote.assetVersion || '') + '，可立即切换。';
+                } else if (buildInfoState.remote) {
+                    statusEl.textContent = '当前已是最新版本。';
+                } else {
+                    statusEl.textContent = '点击检查是否有新版本。';
+                }
+            }
+            if (buttonEl) {
+                buttonEl.innerHTML = buildInfoState.updateAvailable
+                    ? '<i class="fas fa-cloud-download-alt"></i> 立即更新'
+                    : '<i class="fas fa-rotate"></i> 检查更新';
+            }
+        }
+
+        async function applyPendingBuildUpdate() {
+            try {
+                showNotification('正在保存当前内容并切换到新版本…', 'info', 2000);
+                await saveData();
+            } catch (e) {
+                console.warn('[build] 刷新前保存失败，将继续切换版本:', e);
+            }
+            location.reload();
+        }
+
+        async function updateBuildInfoState(options) {
+            options = options || {};
+            const silent = options.silent !== false;
+            const current = getCurrentBuildInfo();
+            try {
+                const remote = await fetchRemoteBuildInfo();
+                buildInfoState.current = current;
+                buildInfoState.remote = remote;
+                buildInfoState.updateAvailable = !!(remote && remote.assetVersion && remote.assetVersion !== current.assetVersion);
+                renderBuildInfoPanel();
+                if (buildInfoState.updateAvailable && !silent) {
+                    showNotification('发现新版本，点“立即更新”可切换到最新版', 'info', 3500);
+                }
+                return buildInfoState.updateAvailable;
+            } catch (error) {
+                console.warn('[build] 检查更新失败:', error);
+                if (!silent) showNotification('检查更新失败，请稍后再试', 'warning', 2500);
+                renderBuildInfoPanel();
+                return false;
+            }
+        }
+
+        async function readSystemChatSeedData(sourceSessionId) {
+            const preset = window.LYSK_BUNDLED_PRESET || {};
+            const prefix = `${APP_PREFIX}${sourceSessionId}_`;
+            const seedResults = await Promise.allSettled([
+                sourceSessionId ? localforage.getItem(prefix + 'chatSettings') : Promise.resolve(null),
+                sourceSessionId ? localforage.getItem(prefix + 'customReplies') : Promise.resolve(null),
+                sourceSessionId ? localforage.getItem(prefix + 'customReplyGroups') : Promise.resolve(null),
+                sourceSessionId ? localforage.getItem(prefix + 'customEmojis') : Promise.resolve(null),
+                sourceSessionId ? localforage.getItem(prefix + 'chatBackground') : Promise.resolve(null),
+                sourceSessionId ? localforage.getItem(prefix + 'myAvatar') : Promise.resolve(null)
+            ]);
+            const read = function(index) {
+                return seedResults[index].status === 'fulfilled' ? seedResults[index].value : null;
+            };
+
+            return {
+                settings: Object.assign({}, getDefaultSettings(), preset.chatSettings || {}, read(0) || {}),
+                customReplies: Array.isArray(read(1))
+                    ? read(1)
+                    : ((preset.replyPreset && Array.isArray(preset.replyPreset.customReplies)) ? preset.replyPreset.customReplies : []),
+                customReplyGroups: Array.isArray(read(2))
+                    ? read(2)
+                    : ((preset.replyPreset && Array.isArray(preset.replyPreset.customReplyGroups)) ? preset.replyPreset.customReplyGroups : []),
+                customEmojis: Array.isArray(read(3))
+                    ? read(3)
+                    : ((preset.replyPreset && Array.isArray(preset.replyPreset.customEmojis)) ? preset.replyPreset.customEmojis : []),
+                chatBackground: read(4) || null,
+                myAvatar: read(5) || null
+            };
+        }
+
+        async function seedSystemSessionData(session, seedData) {
+            if (!session || !session.id) return;
+            seedData = seedData || await readSystemChatSeedData(SESSION_ID);
+            const settingsKey = `${APP_PREFIX}${session.id}_chatSettings`;
+            const repliesKey = `${APP_PREFIX}${session.id}_customReplies`;
+            const groupsKey = `${APP_PREFIX}${session.id}_customReplyGroups`;
+            const emojisKey = `${APP_PREFIX}${session.id}_customEmojis`;
+            const backgroundKey = `${APP_PREFIX}${session.id}_chatBackground`;
+            const myAvatarKey = `${APP_PREFIX}${session.id}_myAvatar`;
+            const partnerAvatarKey = `${APP_PREFIX}${session.id}_partnerAvatar`;
+
+            const roleMember = session.systemChatType === 'dm' ? getGroupMemberByRoleId(session.systemRoleId) : null;
+            const nextSettings = Object.assign({}, seedData.settings || {});
+            if (session.systemChatType === 'group') {
+                nextSettings.partnerName = (window.LYSK_BUNDLED_PRESET && window.LYSK_BUNDLED_PRESET.chatSettings && window.LYSK_BUNDLED_PRESET.chatSettings.partnerName) || '深空群聊';
+                nextSettings.showPartnerNameInChat = true;
+            } else if (roleMember) {
+                nextSettings.partnerName = roleMember.name || nextSettings.partnerName || '对方';
+                nextSettings.partnerStatus = nextSettings.partnerStatus || '在线';
+                nextSettings.showPartnerNameInChat = false;
+            }
+
+            await Promise.allSettled([
+                localforage.setItem(settingsKey, nextSettings),
+                localforage.setItem(repliesKey, seedData.customReplies || []),
+                localforage.setItem(groupsKey, seedData.customReplyGroups || []),
+                localforage.setItem(emojisKey, seedData.customEmojis || []),
+                seedData.chatBackground ? localforage.setItem(backgroundKey, seedData.chatBackground) : Promise.resolve(),
+                seedData.myAvatar ? localforage.setItem(myAvatarKey, seedData.myAvatar) : Promise.resolve(),
+                roleMember ? localforage.setItem(partnerAvatarKey, getMemberAvatarSrc(roleMember)) : Promise.resolve()
+            ]);
+        }
+
+        async function ensureSystemChatSessions(activeSessionId) {
+            const definitions = getSystemChatDefinitions();
+            const byKey = new Map();
+            sessionList.forEach(function(session) {
+                if (session && session.systemChatKey) byKey.set(session.systemChatKey, session);
+            });
+
+            let changed = false;
+            const currentSession = getSessionById(activeSessionId) || sessionList[0] || null;
+            let createdSessions = [];
+
+            if (!byKey.has('group')) {
+                if (currentSession && !currentSession.systemChatKey) {
+                    currentSession.systemChatKey = 'group';
+                    currentSession.systemChatType = 'group';
+                    currentSession.name = currentSession.name || definitions[0].name;
+                    byKey.set('group', currentSession);
+                    changed = true;
+                } else {
+                    const groupSession = {
+                        id: makeSessionId(),
+                        name: definitions[0].name,
+                        createdAt: Date.now(),
+                        systemChatKey: 'group',
+                        systemChatType: 'group'
+                    };
+                    sessionList.push(groupSession);
+                    byKey.set('group', groupSession);
+                    createdSessions.push(groupSession);
+                    changed = true;
+                }
+            }
+
+            const seedSourceId = (byKey.get('group') && byKey.get('group').id) || activeSessionId || SESSION_ID;
+            const seedData = await readSystemChatSeedData(seedSourceId);
+
+            definitions.slice(1).forEach(function(definition) {
+                if (byKey.has(definition.key)) return;
+                const session = {
+                    id: makeSessionId(),
+                    name: definition.name,
+                    createdAt: Date.now(),
+                    systemChatKey: definition.key,
+                    systemChatType: definition.type,
+                    systemRoleId: definition.roleId || null
+                };
+                sessionList.push(session);
+                byKey.set(definition.key, session);
+                createdSessions.push(session);
+                changed = true;
+            });
+
+            if (changed) {
+                await localforage.setItem(`${APP_PREFIX}sessionList`, sessionList);
+            }
+
+            for (const session of createdSessions) {
+                await seedSystemSessionData(session, seedData);
+            }
+
+            return byKey;
+        }
+
+        function syncChatModeStateFromSession(session) {
+            const meta = session || getCurrentSessionMeta();
+            if (!meta || !meta.systemChatKey) {
+                chatModeState = normalizeChatModeState(chatModeState);
+                return;
+            }
+            if (meta.systemChatType === 'dm' && meta.systemRoleId) {
+                chatModeState = { mode: 'dm', activeRoleId: meta.systemRoleId };
+            } else {
+                chatModeState = { mode: 'group', activeRoleId: null };
+            }
+        }
+
+        async function persistChatModeState() {
+            try {
+                await localforage.setItem(getChatModeStateKey(), chatModeState);
+            } catch (e) {
+                console.warn('[chat-mode] 保存模式状态失败:', e);
+            }
+        }
+
+        window.isGroupChatMode = function() {
+            const session = getCurrentSessionMeta();
+            return !!(session && session.systemChatType === 'group');
+        };
+
+        window.getActiveChatRoleMember = function() {
+            const session = getCurrentSessionMeta();
+            if (!session || !session.systemChatKey || session.systemChatType !== 'dm') return null;
+            const roleId = session.systemRoleId || chatModeState.activeRoleId;
+            return roleId ? getGroupMemberByRoleId(roleId) : null;
+        };
+
+        window.getSystemChatSessions = function() {
+            const definitions = getSystemChatDefinitions();
+            return definitions.map(function(definition) {
+                const session = sessionList.find(function(item) {
+                    return item && item.systemChatKey === definition.key;
+                }) || null;
+                return Object.assign({}, definition, { session: session });
+            }).filter(function(entry) {
+                return !!entry.session;
+            });
+        };
+
+        function applyCurrentChatModeContext() {
+            const isGroupMode = window.isGroupChatMode();
+            const activeRole = window.getActiveChatRoleMember();
+            if (typeof groupChatSettings !== 'undefined') {
+                groupChatSettings.enabled = isGroupMode;
+            }
+
+            if (isGroupMode) {
+                settings.partnerName = (window.LYSK_BUNDLED_PRESET && window.LYSK_BUNDLED_PRESET.chatSettings && window.LYSK_BUNDLED_PRESET.chatSettings.partnerName) || settings.partnerName || '深空群聊';
+                settings.showPartnerNameInChat = true;
+            } else if (activeRole) {
+                settings.partnerName = activeRole.name || settings.partnerName || '对方';
+                settings.showPartnerNameInChat = false;
+                updateAvatar(DOMElements.partner.avatar, getMemberAvatarSrc(activeRole));
+            }
+
+            if (!activeRole && !isGroupMode) {
+                settings.showPartnerNameInChat = !!settings.showPartnerNameInChat;
+            }
+
+            syncChatModeStateFromSession();
+            persistChatModeState();
+
+            if (typeof updateGroupModeUI === 'function') updateGroupModeUI();
+            if (typeof renderChatModeList === 'function') renderChatModeList();
+        }
+
+        window.switchToSession = async function(sessionId, options) {
+            options = options || {};
+            if (!sessionId || sessionId === SESSION_ID) return true;
+            const targetSession = getSessionById(sessionId);
+            if (!targetSession) return false;
+
+            try {
+                await saveData();
+            } catch (e) {
+                console.warn('[session] 切换前保存失败:', e);
+            }
+
+            hideTypingIndicator();
+            currentReplyTo = null;
+            SESSION_ID = sessionId;
+            displayedMessageCount = HISTORY_BATCH_SIZE;
+            window.location.hash = sessionId;
+            await localforage.setItem(`${APP_PREFIX}lastSessionId`, SESSION_ID);
+            syncChatModeStateFromSession(targetSession);
+            await persistChatModeState();
+            await loadData();
+            if (options.notify !== false) {
+                showNotification('已切换到 ' + (targetSession.name || '新聊天'), 'success', 1500);
+            }
+            return true;
+        };
+
+        window.switchSystemChatMode = async function(nextMode, roleId) {
+            const systemSessions = window.getSystemChatSessions();
+            const target = systemSessions.find(function(entry) {
+                if (!entry || !entry.session) return false;
+                if (nextMode === 'group') return entry.type === 'group';
+                return entry.type === 'dm' && entry.roleId === roleId;
+            });
+            if (!target || !target.session) return false;
+            chatModeState = nextMode === 'group'
+                ? { mode: 'group', activeRoleId: null }
+                : { mode: 'dm', activeRoleId: roleId || null };
+            await persistChatModeState();
+            return window.switchToSession(target.session.id, { notify: false });
+        };
+
+        window.renderChatModeList = function() {
+            const list = DOMElements.chatModeModal && DOMElements.chatModeModal.list;
+            if (!list) return;
+            const activeSessionId = SESSION_ID;
+            const systemSessions = window.getSystemChatSessions();
+            list.innerHTML = systemSessions.map(function(entry) {
+                const member = entry.member || (entry.roleId ? getGroupMemberByRoleId(entry.roleId) : null);
+                const avatar = entry.type === 'group' ? null : getMemberAvatarSrc(member);
+                const active = entry.session && entry.session.id === activeSessionId;
+                const iconHtml = avatar
+                    ? '<img src="' + avatar + '" style="width:42px;height:42px;border-radius:50%;object-fit:cover;">'
+                    : '<div style="width:42px;height:42px;border-radius:50%;background:rgba(var(--accent-color-rgb),0.14);display:flex;align-items:center;justify-content:center;color:var(--accent-color);"><i class="fas ' + (entry.type === 'group' ? 'fa-users' : 'fa-user') + '"></i></div>';
+                const subText = entry.type === 'group' ? '多人同屏回复' : '独立单聊记录';
+                return '<button class="settings-card" data-session-id="' + entry.session.id + '" style="display:flex;align-items:center;gap:12px;text-align:left;padding:12px 14px;' + (active ? 'border-color:var(--accent-color);box-shadow:0 8px 22px rgba(var(--accent-color-rgb),0.12);' : '') + '">'
+                    + iconHtml
+                    + '<span style="flex:1;display:flex;flex-direction:column;gap:3px;">'
+                    + '<strong style="font-size:14px;color:var(--text-primary);font-weight:600;">' + (entry.name || '聊天') + '</strong>'
+                    + '<span style="font-size:11px;color:var(--text-secondary);">' + subText + '</span>'
+                    + '</span>'
+                    + '<span style="font-size:11px;color:' + (active ? 'var(--accent-color)' : 'var(--text-secondary)') + ';font-weight:600;">' + (active ? '当前' : '切换') + '</span>'
+                    + '</button>';
+            }).join('');
+        };
+
+        function hideTypingIndicator() {
+            try {
+                if (window._typingIndicatorAutoHideTimer) {
+                    clearTimeout(window._typingIndicatorAutoHideTimer);
+                    window._typingIndicatorAutoHideTimer = null;
+                }
+            } catch (e) {}
+            var wrapper = document.getElementById('typing-indicator-wrapper');
+            if (!wrapper) return;
+            var inner = wrapper.querySelector('.typing-indicator');
+            if (inner) {
+                inner.classList.add('hiding');
+                setTimeout(function() {
+                    wrapper.style.display = 'none';
+                    inner.classList.remove('hiding');
+                }, 240);
+            } else {
+                wrapper.style.display = 'none';
+            }
+        }
+
+        function showTypingIndicatorForMember(member, options) {
+            options = options || {};
+            if (!settings.typingIndicatorEnabled) return;
+            const tiWrapper = document.getElementById('typing-indicator-wrapper');
+            const tiLabel = document.getElementById('typing-indicator-label');
+            const tiAvatar = document.getElementById('typing-indicator-avatar');
+            const label = options.label || (member && member.name ? (member.name + ' 正在输入') : ((settings.partnerName || '对方') + ' 正在输入'));
+
+            if (tiLabel) tiLabel.textContent = label;
+            if (tiWrapper) {
+                positionTypingIndicator();
+                tiWrapper.style.display = 'block';
+            }
+            if (tiAvatar) {
+                const avatarSrc = member ? getMemberAvatarSrc(member) : null;
+                if (avatarSrc) {
+                    tiAvatar.innerHTML = '<img src="' + avatarSrc + '">';
+                } else if (member && member.name) {
+                    const initials = member.name.charAt(0).toUpperCase();
+                    tiAvatar.innerHTML = '<div style="width:100%;height:100%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;border-radius:50%;">' + initials + '</div>';
+                } else {
+                    const partnerImg = DOMElements.partner.avatar.querySelector('img');
+                    tiAvatar.innerHTML = partnerImg ? ('<img src="' + partnerImg.src + '">') : '<i class="fas fa-user"></i>';
+                }
+            }
+            DOMElements.chatContainer.scrollTop = DOMElements.chatContainer.scrollHeight;
+        }
+
+        function showGenericGroupTypingIndicator() {
+            showTypingIndicatorForMember(null, { label: '群聊中有人正在输入' });
+        }
+
 
         function renderBackgroundGallery() {
             const list = document.getElementById('background-gallery-list');
@@ -421,6 +907,8 @@ const loadData = async () => {
             updateAvatar(DOMElements.me.avatar, myAvatarSrc);
         }
 
+        applyCurrentChatModeContext();
+
         if (savedChatBg) {
             applyBackground(savedChatBg);
         } else {
@@ -440,6 +928,7 @@ const loadData = async () => {
             applyAllAvatarFrames();
             manageAutoSendTimer(); 
             checkEnvelopeStatus(); 
+            renderBuildInfoPanel();
             updateUI();
             if (settings.customBubbleCss) {
                 try { applyCustomBubbleCss(settings.customBubbleCss); } catch(e) {}
@@ -842,6 +1331,9 @@ function manageAutoSendTimer() {
             DOMElements.me.name.textContent = settings.myName;
             DOMElements.partner.status.textContent = settings.partnerStatus || '在线';
             DOMElements.me.statusText.textContent = settings.myStatus;
+            if (DOMElements.chatModeModal && DOMElements.chatModeModal.openBtn) {
+                DOMElements.chatModeModal.openBtn.classList.toggle('active', !window.isGroupChatMode());
+            }
             if (typeof window.updateDynamicNames === 'function') window.updateDynamicNames();
             document.documentElement.style.setProperty('--font-size', `${settings.fontSize}px`);
             
@@ -890,6 +1382,7 @@ function manageAutoSendTimer() {
             const _immToggle = document.getElementById('immersive-toggle');
             if (_immToggle) _immToggle.classList.toggle('active', document.body.classList.contains('immersive-mode'));
 
+            if (typeof renderChatModeList === 'function') renderChatModeList();
             renderMessages();
         };
 
@@ -1066,7 +1559,9 @@ function createMessageFragment(msg, prevMsg, nextMsg, lastSenderRef) {
     let messageHTML = '';
     if (msg.replyTo) {
         const repliedText = msg.replyTo.text || (msg.replyTo.image ? '🖼 图片' : '[消息]');
-        const repliedSender = msg.replyTo.sender === 'user' ? (settings.myName || '我') : (settings.partnerName || '对方');
+        const repliedSender = msg.replyTo.sender === 'user'
+            ? (settings.myName || '我')
+            : (msg.replyTo.sender || settings.partnerName || '对方');
         messageHTML += `<div class="reply-indicator" data-reply-id="${msg.replyTo.id || ''}" style="cursor:pointer;" onclick="scrollToQuotedMessage(this)"><span class="reply-indicator-sender">${repliedSender}</span><span class="reply-indicator-text">${repliedText}</span></div>`;
     }
 
@@ -1326,7 +1821,9 @@ const addMessage = (message) => {
                 container.style.display = 'none';
                 return;
             }
-            const senderName = currentReplyTo.sender === 'user' ? (settings.myName || '我') : (settings.partnerName || '对方');
+            const senderName = currentReplyTo.sender === 'user'
+                ? (settings.myName || '我')
+                : (currentReplyTo.sender || settings.partnerName || '对方');
             const previewText = currentReplyTo.text ? currentReplyTo.text.slice(0, 40) : '🖼 图片';
             container.style.display = 'flex';
             container.innerHTML = `
@@ -1387,7 +1884,7 @@ const addMessage = (message) => {
 
             addMessage({ id: Date.now(), text: pokeText, timestamp: new Date(), type: 'system' });
             if (typeof playSound === 'function') playSound('partner_poke');
-            (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
+            hideTypingIndicator();
         };
 
         function sendMessage(textOverride = null, type = 'normal') {
@@ -1464,25 +1961,12 @@ if (!isBatchMode && type === 'normal') {
 
             if (!shouldIgnore) {
         if (settings.typingIndicatorEnabled) {
-            const tiWrapper = document.getElementById('typing-indicator-wrapper');
-            const tiLabel = document.getElementById('typing-indicator-label');
-            const tiAvatar = document.getElementById('typing-indicator-avatar');
-            if (tiLabel) {
-                const isGroupTyping = typeof groupChatSettings !== 'undefined'
-                    && groupChatSettings.enabled
-                    && groupChatSettings.members
-                    && groupChatSettings.members.length > 0;
-                tiLabel.textContent = isGroupTyping ? '群聊中有人正在输入' : (settings.partnerName || '对方') + ' 正在输入';
+            const activeRole = typeof window.getActiveChatRoleMember === 'function' ? window.getActiveChatRoleMember() : null;
+            if (typeof window.isGroupChatMode === 'function' && window.isGroupChatMode()) {
+                showGenericGroupTypingIndicator();
+            } else {
+                showTypingIndicatorForMember(activeRole);
             }
-            if (tiWrapper) { 
-                positionTypingIndicator(); 
-                tiWrapper.style.display = 'block'; 
-            }
-            if (tiAvatar) {
-                const partnerImg = DOMElements.partner.avatar.querySelector('img');
-                tiAvatar.innerHTML = partnerImg ? `<img src="${partnerImg.src}">` : '<i class="fas fa-user"></i>';
-            }
-            if (DOMElements.chatContainer) DOMElements.chatContainer.scrollTop = DOMElements.chatContainer.scrollHeight;
         }
         window._pendingReplyTimer = setTimeout(() => {
             window._pendingReplyTimer = null;
@@ -1609,34 +2093,6 @@ if (!isBatchMode && type === 'normal') {
         })();
 
 window.simulateReply = function() {
-            function showTypingIndicator(member) {
-                if (!settings.typingIndicatorEnabled) return;
-                const tiWrapper = document.getElementById('typing-indicator-wrapper');
-                const tiLabel = document.getElementById('typing-indicator-label');
-                const tiAvatar = document.getElementById('typing-indicator-avatar');
-                if (tiLabel) {
-                    tiLabel.textContent = member && member.name
-                        ? member.name + ' 正在输入'
-                        : (settings.partnerName || '对方') + ' 正在输入';
-                }
-                if (tiWrapper) { 
-                    positionTypingIndicator(); 
-                    tiWrapper.style.display = 'block'; 
-                }
-                if (tiAvatar) {
-                    if (member && member.avatar) {
-                        tiAvatar.innerHTML = `<img src="${member.avatar}">`;
-                    } else if (member && member.name) {
-                        const initials = member.name.charAt(0).toUpperCase();
-                        tiAvatar.innerHTML = `<div style="width:100%;height:100%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;border-radius:50%;">${initials}</div>`;
-                    } else {
-                        const partnerImg = DOMElements.partner.avatar.querySelector('img');
-                        tiAvatar.innerHTML = partnerImg ? `<img src="${partnerImg.src}">` : '<i class="fas fa-user"></i>';
-                    }
-                }
-                DOMElements.chatContainer.scrollTop = DOMElements.chatContainer.scrollHeight;
-            }
-
             let changed = false;
             messages.forEach(msg => {
                 if (msg.sender === 'user' && msg.status !== 'read') {
@@ -1647,7 +2103,17 @@ window.simulateReply = function() {
                 _updateReadReceiptsDOM(); throttledSaveData();
             }
 
-if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
+            const activeRoleMember = typeof window.getActiveChatRoleMember === 'function'
+                ? window.getActiveChatRoleMember()
+                : null;
+            const isGroupReplyMode =
+                typeof window.isGroupChatMode === 'function'
+                && window.isGroupChatMode()
+                && typeof groupChatSettings !== 'undefined'
+                && Array.isArray(groupChatSettings.members)
+                && groupChatSettings.members.length > 0;
+
+if (!isGroupReplyMode && !activeRoleMember && partnerPersonas && partnerPersonas.length > 0 && Math.random() < 0.3) {
                 const currentPool = [
                     ...partnerPersonas
                 ];
@@ -1670,14 +2136,9 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                 return;
             }
 
-            const isGroupReplyMode =
-                typeof groupChatSettings !== 'undefined' &&
-                groupChatSettings.enabled &&
-                Array.isArray(groupChatSettings.members) &&
-                groupChatSettings.members.length > 0;
             let replyCount = isGroupReplyMode
                 ? Math.min(groupChatSettings.members.length, 3 + Math.floor(Math.random() * 3))
-                : (Math.random() < 0.75 ? 1 : (Math.random() < 0.95 ? 2 : 3));
+                : 1;
             if (!customReplies || customReplies.length === 0) {
                 showNotification('回复库为空，请先到「自定义回复」中添加内容', 'info', 3500);
                 return;
@@ -1705,17 +2166,27 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
             if (isGroupReplyMode && typeof window.buildGroupChatReplyPlan === 'function') {
                 groupReplyPlan = window.buildGroupChatReplyPlan(replyCount);
                 if (groupReplyPlan.length) replyCount = groupReplyPlan.length;
+            } else if (activeRoleMember && typeof window.pickDirectRoleReply === 'function') {
+                const directReply = window.pickDirectRoleReply(activeRoleMember.id);
+                if (directReply) {
+                    groupReplyPlan = [directReply];
+                    replyCount = 1;
+                }
             }
             if (!groupReplyPlan.length) {
                 for (let i = 0; i < replyCount; i++) {
-                    if (typeof window.pickGroupChatReply === 'function') groupReplyPlan.push(window.pickGroupChatReply());
-                    else groupReplyPlan.push(null);
+                    if (isGroupReplyMode && typeof window.pickGroupChatReply === 'function') groupReplyPlan.push(window.pickGroupChatReply());
+                    else groupReplyPlan.push(activeRoleMember ? { member: activeRoleMember, text: '' } : null);
                 }
             }
 
             // 确认有可用回复后再展示“正在输入中”，避免空转
-            const firstGroupMember = groupReplyPlan.find(plan => plan && plan.member)?.member || null;
-            showTypingIndicator(firstGroupMember);
+            const firstSpeaker = groupReplyPlan.find(plan => plan && plan.member)?.member || activeRoleMember || null;
+            if (isGroupReplyMode && !firstSpeaker) {
+                showGenericGroupTypingIndicator();
+            } else {
+                showTypingIndicatorForMember(firstSpeaker);
+            }
             let delay = 0;
             const recentUserMsgs = settings.replyEnabled
                 ? messages.filter(m => m.sender === 'user' && m.text).slice(-10)
@@ -1729,9 +2200,10 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                     const replyPool = replyPoolOnce;
                     let replyText = '';
                     let senderName = settings.partnerName || '对方';
+                    const currentMember = plannedGroupReply?.member || activeRoleMember || null;
                     if (plannedGroupReply && plannedGroupReply.text) {
                         replyText = String(plannedGroupReply.text).trim();
-                        senderName = plannedGroupReply.member?.name || senderName;
+                        senderName = currentMember?.name || senderName;
                     } else {
                         // 被屏蔽或无效项直接换下一个，尽量保证每次都产出可用回复
                         for (let t = 0; t < 6; t++) {
@@ -1743,7 +2215,7 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                         }
                     }
                     if (!replyText && i === replyCount - 1) {
-                        (function(){try{if(window._typingIndicatorAutoHideTimer){clearTimeout(window._typingIndicatorAutoHideTimer);window._typingIndicatorAutoHideTimer=null;}}catch(e){}var _tiW=document.getElementById('typing-indicator-wrapper');if(_tiW){var _tiInner=_tiW.querySelector('.typing-indicator');if(_tiInner){_tiInner.classList.add('hiding');setTimeout(function(){_tiW.style.display='none';if(_tiInner)_tiInner.classList.remove('hiding');},240);}else{_tiW.style.display='none';}}})();
+                        hideTypingIndicator();
                         return;
                     }
 
@@ -1765,26 +2237,6 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                                 : replyText + ' ' + emoji;
                         } else {
                             separateEmoji = emoji;
-                        }
-                    }
-
-                    // Update typing indicator to reflect current speaker in group chat
-                    if (typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled && settings.typingIndicatorEnabled) {
-                        const currentMember = plannedGroupReply?.member || null;
-                        const tiLabel = document.getElementById('typing-indicator-label');
-                        const tiAvatar = document.getElementById('typing-indicator-avatar');
-                        if (tiLabel) {
-                            tiLabel.textContent = currentMember && currentMember.name
-                                ? currentMember.name + ' 正在输入'
-                                : (settings.partnerName || '对方') + ' 正在输入';
-                        }
-                        if (tiAvatar && currentMember) {
-                            if (currentMember.avatar) {
-                                tiAvatar.innerHTML = `<img src="${currentMember.avatar}">`;
-                            } else {
-                                const initials = currentMember.name.charAt(0).toUpperCase();
-                                tiAvatar.innerHTML = `<div style="width:100%;height:100%;background:var(--accent-color);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;border-radius:50%;">${initials}</div>`;
-                            }
                         }
                     }
 
@@ -1843,38 +2295,21 @@ if (!(typeof groupChatSettings !== 'undefined' && groupChatSettings.enabled) && 
                         }, 300 + Math.random() * 400);
                     }
 
-                    if (i === replyCount - 1) {
-                        (function() {
-                            try {
-                                if (window._typingIndicatorAutoHideTimer) {
-                                    clearTimeout(window._typingIndicatorAutoHideTimer);
-                                    window._typingIndicatorAutoHideTimer = null;
-                                }
-                            } catch (e) {}
-                            var _tiW = document.getElementById('typing-indicator-wrapper');
-                            if (_tiW) {
-                                var _tiInner = _tiW.querySelector('.typing-indicator');
-                                if (_tiInner) {
-                                    _tiInner.classList.add('hiding');
-                                    setTimeout(function() {
-                                        _tiW.style.display = 'none';
-                                        if (_tiInner) _tiInner.classList.remove('hiding');
-                                    }, 240);
-                                } else {
-                                    _tiW.style.display = 'none';
-                                }
-                            }
-                        })();
+                    if (i < replyCount - 1) {
+                        const nextMember = groupReplyPlan[i + 1]?.member || activeRoleMember || null;
+                        if (isGroupReplyMode && !nextMember) {
+                            showGenericGroupTypingIndicator();
+                        } else {
+                            showTypingIndicatorForMember(nextMember);
+                        }
+                    } else {
+                        hideTypingIndicator();
                     }
                     } catch (e) {
                         console.error('[simulateReply] 渲染/回填出错:', e);
                         // 机制性兜底：出错时至少让“正在输入中”消失，避免假死
                         try {
-                            (function(){
-                                try { if (window._typingIndicatorAutoHideTimer) { clearTimeout(window._typingIndicatorAutoHideTimer); window._typingIndicatorAutoHideTimer = null; } } catch (e2) {}
-                                var _tiW2 = document.getElementById('typing-indicator-wrapper');
-                                if (_tiW2) _tiW2.style.display = 'none';
-                            })();
+                            hideTypingIndicator();
                         } catch (e2) {}
                     }
                 }, delay);
@@ -2366,6 +2801,7 @@ window.initializeSession = async function() {
 
     const sessionsData = await localforage.getItem(`${APP_PREFIX}sessionList`);
     sessionList = sessionsData || [];
+    chatModeState = normalizeChatModeState(await localforage.getItem(getChatModeStateKey()));
 
     const hash = window.location.hash.substring(1);
     if (hash && sessionList.some(s => s.id === hash)) {
@@ -2377,6 +2813,12 @@ window.initializeSession = async function() {
         SESSION_ID = await createNewSession(false);
     }
 
+    await ensureSystemChatSessions(SESSION_ID);
+    const currentSession = getCurrentSessionMeta();
+    if (currentSession && currentSession.systemChatKey) {
+        syncChatModeStateFromSession(currentSession);
+    }
+    await persistChatModeState();
     await localforage.setItem(`${APP_PREFIX}lastSessionId`, SESSION_ID);
 }
 
