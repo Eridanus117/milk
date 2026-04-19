@@ -433,9 +433,11 @@ fileInput.addEventListener('change', function(e) {
                 if (typeof renderBuildInfoPanel === 'function') renderBuildInfoPanel();
                 showModal(DOMElements.settingsModal.modal);
             });
-            DOMElements.favoritesModal.favoritesBtn.addEventListener('click', () => {
+            if (DOMElements.favoritesModal && DOMElements.favoritesModal.favoritesBtn) {
+                DOMElements.favoritesModal.favoritesBtn.addEventListener('click', () => {
                 showModal(document.getElementById('group-chat-modal'));
-            });
+                });
+            }
             const checkUpdateBtn = document.getElementById('check-update-btn');
             if (checkUpdateBtn) {
                 checkUpdateBtn.addEventListener('click', async () => {
@@ -1498,22 +1500,53 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
 
 
 
-        DOMElements.sessionModal.managerBtn.addEventListener('click', () => {
-            renderSessionList(); showModal(DOMElements.sessionModal.modal);
-        });
-        DOMElements.sessionModal.createBtn.addEventListener('click', async () => {
-            await createNewSession(false);
-            renderSessionList();
-            showNotification('新会话已创建', 'success');
-        });
+        if (DOMElements.sessionModal && DOMElements.sessionModal.managerBtn) {
+            DOMElements.sessionModal.managerBtn.addEventListener('click', () => {
+                renderSessionList();
+                showModal(DOMElements.sessionModal.modal);
+            });
+        }
+        if (DOMElements.sessionModal && DOMElements.sessionModal.deliveryToggleBtn) {
+            DOMElements.sessionModal.deliveryToggleBtn.addEventListener('click', async () => {
+                backgroundSchedulerState.schedulerEnabled = !backgroundSchedulerState.schedulerEnabled;
+                if (typeof persistBackgroundSchedulerState === 'function') {
+                    await persistBackgroundSchedulerState();
+                } else {
+                    await localforage.setItem(`${APP_PREFIX}schedulerState`, backgroundSchedulerState);
+                }
+                if (typeof manageBackgroundDeliveryTimer === 'function') manageBackgroundDeliveryTimer();
+                if (typeof updateUI === 'function') updateUI();
+                showNotification(`后台来消息已${backgroundSchedulerState.schedulerEnabled ? '开启' : '关闭'}`, 'success');
+            });
+        }
+        if (DOMElements.sessionModal && DOMElements.sessionModal.createBtn) {
+            DOMElements.sessionModal.createBtn.addEventListener('click', async () => {
+                await createNewSession(false);
+                renderSessionList();
+                showNotification('新会话已创建', 'success');
+            });
+        }
 
-        DOMElements.sessionModal.list.addEventListener('click', (e) => {
+        if (DOMElements.sessionModal && DOMElements.sessionModal.list) {
+            DOMElements.sessionModal.list.addEventListener('click', (e) => {
             const item = e.target.closest('.session-item');
             if (!item) return;
             const sessionId = item.dataset.id;
 
+            if (e.target.closest('.group-settings')) {
+                showModal(document.getElementById('group-chat-modal'));
+                return;
+            }
+            if (e.target.closest('.delivery')) {
+                if (typeof window.openSessionDeliverySettings === 'function') {
+                    window.openSessionDeliverySettings(sessionId);
+                }
+                return;
+            }
+
             if (e.target.closest('.rename')) {
                 const session = sessionList.find(s => s.id === sessionId);
+                if (!session) return;
                 if (session && session.systemChatKey) {
                     showNotification('系统聊天入口不支持重命名', 'warning');
                     return;
@@ -1527,6 +1560,7 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                 }
             } else if (e.target.closest('.delete')) {
                 const session = sessionList.find(s => s.id === sessionId);
+                if (!session) return;
                 if (session && session.systemChatKey) {
                     showNotification('系统聊天入口不能删除', 'warning');
                     return;
@@ -1571,7 +1605,8 @@ if (sessionId === currentSessionId) {
                     });
                 }
             }
-        });
+            });
+        }
 
         const initMusicPlayer = async () => {
     const latestSystemSongs = [{

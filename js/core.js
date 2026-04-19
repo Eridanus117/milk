@@ -206,6 +206,117 @@ autoSendInterval: 5,
             return `${APP_PREFIX}chatModeState`;
         }
 
+        function getBackgroundDeliveryStateKey() {
+            return `${APP_PREFIX}backgroundDeliveryState`;
+        }
+
+        function getBackgroundSchedulerStateKey() {
+            return `${APP_PREFIX}schedulerState`;
+        }
+
+        function getBackgroundDeliveryConfigKey(session) {
+            return session && (session.systemChatKey || session.id) ? (session.systemChatKey || session.id) : null;
+        }
+
+        function getBackgroundSchedulerDefaults() {
+            return {
+                schedulerEnabled: true,
+                catchupEnabled: true,
+                maxCatchupMessagesPerSession: 6,
+                maxCatchupWindowHours: 12,
+                tickIntervalSeconds: 20
+            };
+        }
+
+        function getDeliveryProfileDefaults(profile, session) {
+            const normalizedProfile = ['quiet', 'balanced', 'lively'].includes(profile) ? profile : 'balanced';
+            const isGroup = !!(session && session.systemChatType === 'group');
+            const profileMap = {
+                quiet: {
+                    intervalMinMinutes: 20,
+                    intervalMaxMinutes: 45,
+                    batchMin: 1,
+                    batchMax: isGroup ? 2 : 1,
+                    groupSpeakerMin: 1,
+                    groupSpeakerMax: 2
+                },
+                balanced: {
+                    intervalMinMinutes: 8,
+                    intervalMaxMinutes: 20,
+                    batchMin: 1,
+                    batchMax: isGroup ? 3 : 2,
+                    groupSpeakerMin: 2,
+                    groupSpeakerMax: 3
+                },
+                lively: {
+                    intervalMinMinutes: 3,
+                    intervalMaxMinutes: 10,
+                    batchMin: 1,
+                    batchMax: isGroup ? 5 : 3,
+                    groupSpeakerMin: 3,
+                    groupSpeakerMax: 5
+                }
+            };
+            return Object.assign({ profile: normalizedProfile }, profileMap[normalizedProfile]);
+        }
+
+        function getDefaultDeliveryConfig(session) {
+            const profileDefaults = getDeliveryProfileDefaults('balanced', session);
+            return Object.assign({
+                enabled: true,
+                allowOffscreenDelivery: true,
+                muteSoundWhenInactive: true,
+                lastGeneratedAt: null,
+                nextDueAt: null,
+                pendingUnread: 0
+            }, profileDefaults);
+        }
+
+        function normalizeSchedulerState(saved) {
+            const nextState = Object.assign({}, getBackgroundSchedulerDefaults(), saved || {});
+            nextState.schedulerEnabled = nextState.schedulerEnabled !== false;
+            nextState.catchupEnabled = nextState.catchupEnabled !== false;
+            nextState.maxCatchupMessagesPerSession = Math.min(12, Math.max(1, Number(nextState.maxCatchupMessagesPerSession || 6) || 6));
+            nextState.maxCatchupWindowHours = Math.min(48, Math.max(1, Number(nextState.maxCatchupWindowHours || 12) || 12));
+            nextState.tickIntervalSeconds = Math.min(120, Math.max(10, Number(nextState.tickIntervalSeconds || 20) || 20));
+            return nextState;
+        }
+
+        function normalizeDeliveryConfig(session, saved) {
+            const defaults = getDefaultDeliveryConfig(session);
+            const source = Object.assign({}, defaults, saved || {});
+            source.profile = ['quiet', 'balanced', 'lively'].includes(source.profile) ? source.profile : defaults.profile;
+            source.enabled = source.enabled !== false;
+            source.allowOffscreenDelivery = source.allowOffscreenDelivery !== false;
+            source.muteSoundWhenInactive = source.muteSoundWhenInactive !== false;
+            source.intervalMinMinutes = Math.min(240, Math.max(1, Number(source.intervalMinMinutes || defaults.intervalMinMinutes) || defaults.intervalMinMinutes));
+            source.intervalMaxMinutes = Math.min(360, Math.max(source.intervalMinMinutes, Number(source.intervalMaxMinutes || defaults.intervalMaxMinutes) || defaults.intervalMaxMinutes));
+            source.batchMin = Math.min(5, Math.max(1, Number(source.batchMin || defaults.batchMin) || defaults.batchMin));
+            source.batchMax = Math.min(6, Math.max(source.batchMin, Number(source.batchMax || defaults.batchMax) || defaults.batchMax));
+            source.groupSpeakerMin = Math.min(5, Math.max(1, Number(source.groupSpeakerMin || defaults.groupSpeakerMin) || defaults.groupSpeakerMin));
+            source.groupSpeakerMax = Math.min(5, Math.max(source.groupSpeakerMin, Number(source.groupSpeakerMax || defaults.groupSpeakerMax) || defaults.groupSpeakerMax));
+            source.lastGeneratedAt = source.lastGeneratedAt || null;
+            source.nextDueAt = source.nextDueAt || null;
+            source.pendingUnread = Math.max(0, Number(source.pendingUnread || 0) || 0);
+            return source;
+        }
+
+        async function persistBackgroundDeliveryState() {
+            try {
+                await localforage.setItem(getBackgroundDeliveryStateKey(), backgroundDeliveryState);
+            } catch (error) {
+                console.warn('[background-delivery] 保存会话配置失败:', error);
+            }
+        }
+
+        async function persistBackgroundSchedulerState() {
+            try {
+                await localforage.setItem(getBackgroundSchedulerStateKey(), backgroundSchedulerState);
+            } catch (error) {
+                console.warn('[background-delivery] 保存调度配置失败:', error);
+            }
+        }
+
         function makeSessionId() {
             return Date.now().toString(36) + Math.random().toString(36).slice(2);
         }
@@ -252,6 +363,526 @@ autoSendInterval: 5,
                 return session && session.id === sessionId;
             }) || null : null;
         }
+
+        function normalizeSessionRecord(session) {
+            if (!session || typeof session !== 'object') return null;
+            session.unreadCount = Math.max(0, Number(session.unreadCount || 0) || 0);
+            session.lastMessagePreview = typeof session.lastMessagePreview === 'string' ? session.lastMessagePreview : '';
+            session.lastMessageAt = session.lastMessageAt || null;
+            session.lastVisitedAt = session.lastVisitedAt || null;
+            session.lastReadAt = session.lastReadAt || null;
+            return session;
+        }
+
+        function persistSessionList() {
+            return localforage.setItem(`${APP_PREFIX}sessionList`, sessionList);
+        }
+
+        function clampPreviewText(text, maxLength) {
+            const source = String(text || '').replace(/\s+/g, ' ').trim();
+            if (!source) return '';
+            if (source.length <= maxLength) return source;
+            return source.slice(0, maxLength - 1) + '…';
+        }
+
+        function buildMessagePreview(message) {
+            if (!message) return '';
+            let content = '';
+            if (message.image) {
+                content = '[图片]';
+            } else if (message.type === 'sticker') {
+                content = '[表情]';
+            } else if (message.type === 'system') {
+                content = message.text || '[系统消息]';
+            } else {
+                content = message.text || '';
+            }
+            content = clampPreviewText(content, 28) || '[新消息]';
+            if (message.sender === 'user') {
+                return '我: ' + content;
+            }
+            if (message.sender && message.sender !== 'partner') {
+                return clampPreviewText(String(message.sender).trim(), 8) + ': ' + content;
+            }
+            return content;
+        }
+
+        function formatSessionTimestamp(timestamp) {
+            if (!timestamp) return '';
+            const date = new Date(timestamp);
+            if (Number.isNaN(date.getTime())) return '';
+            const now = new Date();
+            const sameDay = date.toDateString() === now.toDateString();
+            if (sameDay) {
+                return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            }
+            const sameYear = date.getFullYear() === now.getFullYear();
+            return date.toLocaleDateString('zh-CN', sameYear
+                ? { month: 'numeric', day: 'numeric' }
+                : { year: 'numeric', month: 'numeric', day: 'numeric' });
+        }
+
+        async function syncSessionSummary(sessionId, options) {
+            const session = getSessionById(sessionId);
+            if (!session) return;
+            options = options || {};
+
+            const sourceMessages = Array.isArray(options.messages)
+                ? options.messages
+                : await localforage.getItem(`${APP_PREFIX}${sessionId}_chatMessages`);
+            const lastMessage = Array.isArray(sourceMessages) && sourceMessages.length > 0
+                ? sourceMessages[sourceMessages.length - 1]
+                : null;
+            const now = Date.now();
+
+            session.lastMessagePreview = lastMessage ? buildMessagePreview(lastMessage) : '';
+            session.lastMessageAt = lastMessage
+                ? new Date(lastMessage.timestamp).getTime()
+                : (session.lastMessageAt || session.createdAt || now);
+
+            if (options.markRead) {
+                session.unreadCount = 0;
+                session.lastVisitedAt = now;
+                session.lastReadAt = now;
+            } else if (options.incrementUnread) {
+                const increment = options.incrementUnread === true ? 1 : Math.max(1, Number(options.incrementUnread) || 1);
+                session.unreadCount = (session.unreadCount || 0) + increment;
+            }
+
+            const deliveryKey = session.systemChatKey ? getBackgroundDeliveryConfigKey(session) : null;
+            if (deliveryKey && backgroundDeliveryState[deliveryKey]) {
+                backgroundDeliveryState[deliveryKey].pendingUnread = session.unreadCount || 0;
+            }
+
+            if (options.persist !== false) {
+                await Promise.all([
+                    persistSessionList(),
+                    deliveryKey ? persistBackgroundDeliveryState() : Promise.resolve()
+                ]);
+            }
+        }
+
+        async function hydrateSessionSummaries() {
+            if (!Array.isArray(sessionList) || sessionList.length === 0) return;
+            let changed = false;
+            const reads = await Promise.all(sessionList.map(function(session) {
+                normalizeSessionRecord(session);
+                if (session.lastMessageAt && session.lastMessagePreview !== undefined) {
+                    return Promise.resolve(null);
+                }
+                return localforage.getItem(`${APP_PREFIX}${session.id}_chatMessages`).catch(function() {
+                    return null;
+                });
+            }));
+
+            sessionList.forEach(function(session, index) {
+                const storedMessages = reads[index];
+                if (!Array.isArray(storedMessages) || storedMessages.length === 0) return;
+                const lastMessage = storedMessages[storedMessages.length - 1];
+                session.lastMessagePreview = buildMessagePreview(lastMessage);
+                session.lastMessageAt = new Date(lastMessage.timestamp).getTime();
+                changed = true;
+            });
+
+            if (changed) {
+                await persistSessionList();
+            }
+        }
+
+        function getUnreadSessionCount() {
+            if (!Array.isArray(sessionList)) return 0;
+            return sessionList.reduce(function(total, session) {
+                if (!session || session.id === SESSION_ID) return total;
+                return total + Math.max(0, Number(session.unreadCount || 0) || 0);
+            }, 0);
+        }
+
+        function getSystemSessionDeliveryConfig(session) {
+            const key = getBackgroundDeliveryConfigKey(session);
+            if (!key) return getDefaultDeliveryConfig(session);
+            return normalizeDeliveryConfig(session, backgroundDeliveryState[key]);
+        }
+
+        function scheduleNextDeliveryAt(config, fromTimestamp) {
+            const base = Number(fromTimestamp || Date.now()) || Date.now();
+            const minMs = Math.max(1, Number(config.intervalMinMinutes || 1)) * 60 * 1000;
+            const maxMs = Math.max(minMs, Number(config.intervalMaxMinutes || config.intervalMinMinutes || 1)) * 60 * 1000;
+            return base + minMs + Math.random() * Math.max(0, maxMs - minMs);
+        }
+
+        function formatMinutesLabel(minutes) {
+            const value = Math.max(1, Number(minutes || 0) || 1);
+            if (value >= 60) {
+                const hours = value / 60;
+                return Number.isInteger(hours) ? `${hours}小时` : `${hours.toFixed(1)}小时`;
+            }
+            return `${value}分钟`;
+        }
+
+        function readDisabledTextSet(storageKey) {
+            try {
+                const raw = localStorage.getItem(storageKey);
+                return raw ? new Set(JSON.parse(raw)) : new Set();
+            } catch (error) {
+                return new Set();
+            }
+        }
+
+        function getReplyGroupKindLite(group) {
+            if (!group || typeof group !== 'object') return 'public';
+            const kind = String(group.kind || '').trim();
+            if (kind === 'public' || kind === 'role' || kind === 'intimate' || kind === 'link') return kind;
+            if (group.scope === 'public') return 'public';
+            const name = String(group.name || '').trim();
+            if (/夜话|暧昧|撩拨|夜火/.test(name)) return 'intimate';
+            return 'role';
+        }
+
+        function buildSpeakerReplyBucketsFromData(data, speakerName) {
+            const replies = Array.isArray(data.customReplies) ? data.customReplies : [];
+            const groups = Array.isArray(data.customReplyGroups) ? data.customReplyGroups : [];
+            const validItems = new Set(replies.map(function(item) {
+                return String(item || '').trim();
+            }).filter(Boolean));
+            const disabledItems = readDisabledTextSet('disabledReplyItems');
+            const disabledGroupItems = new Set();
+            groups.forEach(function(group) {
+                if (group && group.disabled && Array.isArray(group.items)) {
+                    group.items.forEach(function(item) {
+                        disabledGroupItems.add(String(item || '').trim());
+                    });
+                }
+            });
+
+            const buckets = { public: [], role: [], intimate: [], link: [] };
+            const seen = new Set();
+            groups.forEach(function(group) {
+                if (!group || group.disabled || !Array.isArray(group.items)) return;
+                const isPublic = group.scope === 'public';
+                const isSpeaker = String(group.speaker || '').trim() === speakerName;
+                if (!isPublic && !isSpeaker) return;
+                const kind = getReplyGroupKindLite(group);
+                group.items.forEach(function(item) {
+                    const text = String(item || '').trim();
+                    if (!text || seen.has(text) || !validItems.has(text)) return;
+                    if (disabledItems.has(text) || disabledGroupItems.has(text)) return;
+                    seen.add(text);
+                    buckets[kind].push(text);
+                });
+            });
+
+            return buckets;
+        }
+
+        function pickRandomFromArray(items) {
+            if (!Array.isArray(items) || items.length === 0) return null;
+            return items[Math.floor(Math.random() * items.length)] || null;
+        }
+
+        function pickReplyTextForSpeaker(data, speakerName) {
+            const buckets = buildSpeakerReplyBucketsFromData(data, speakerName);
+            const weightedKinds = ['role', 'public', 'intimate', 'link'];
+            for (const kind of weightedKinds) {
+                const picked = pickRandomFromArray(buckets[kind]);
+                if (picked) return String(picked).trim();
+            }
+
+            const disabledItems = readDisabledTextSet('disabledReplyItems');
+            const disabledGroupItems = new Set();
+            (Array.isArray(data.customReplyGroups) ? data.customReplyGroups : []).forEach(function(group) {
+                if (group && group.disabled && Array.isArray(group.items)) {
+                    group.items.forEach(function(item) {
+                        disabledGroupItems.add(String(item || '').trim());
+                    });
+                }
+            });
+            const genericPool = (Array.isArray(data.customReplies) ? data.customReplies : []).map(function(item) {
+                return String(item || '').trim();
+            }).filter(function(item) {
+                return !!item && !disabledItems.has(item) && !disabledGroupItems.has(item);
+            });
+            return pickRandomFromArray(genericPool) || '';
+        }
+
+        async function readSessionDeliveryPayload(session) {
+            if (!session || !session.id) return null;
+            if (session.id === SESSION_ID) {
+                return {
+                    settings: Object.assign({}, settings),
+                    messages: Array.isArray(messages) ? messages.slice() : [],
+                    customReplies: Array.isArray(customReplies) ? customReplies.slice() : [],
+                    customReplyGroups: Array.isArray(window.customReplyGroups) ? window.customReplyGroups.slice() : [],
+                    customEmojis: Array.isArray(customEmojis) ? customEmojis.slice() : [],
+                    stickerLibrary: Array.isArray(stickerLibrary) ? stickerLibrary.slice() : []
+                };
+            }
+
+            const [sessionSettings, sessionMessages, sessionReplies, sessionReplyGroups, sessionEmojis, sessionStickers] = await Promise.all([
+                localforage.getItem(`${APP_PREFIX}${session.id}_chatSettings`),
+                localforage.getItem(`${APP_PREFIX}${session.id}_chatMessages`),
+                localforage.getItem(`${APP_PREFIX}${session.id}_customReplies`),
+                localforage.getItem(`${APP_PREFIX}${session.id}_customReplyGroups`),
+                localforage.getItem(`${APP_PREFIX}${session.id}_customEmojis`),
+                localforage.getItem(`${APP_PREFIX}${session.id}_stickerLibrary`)
+            ]);
+
+            return {
+                settings: Object.assign({}, getDefaultSettings(), sessionSettings || {}),
+                messages: Array.isArray(sessionMessages) ? sessionMessages.map(function(message) {
+                    return Object.assign({}, message, {
+                        timestamp: new Date(message.timestamp)
+                    });
+                }) : [],
+                customReplies: Array.isArray(sessionReplies) ? sessionReplies : [],
+                customReplyGroups: Array.isArray(sessionReplyGroups) ? sessionReplyGroups : [],
+                customEmojis: Array.isArray(sessionEmojis) ? sessionEmojis : [],
+                stickerLibrary: Array.isArray(sessionStickers) ? sessionStickers : []
+            };
+        }
+
+        function buildGeneratedMessage(session, senderName, text, timestamp, extra) {
+            const base = {
+                id: Date.now() + Math.random(),
+                sender: senderName,
+                text: text,
+                timestamp: new Date(timestamp),
+                status: 'received',
+                favorited: false,
+                note: null,
+                type: 'normal'
+            };
+            return Object.assign(base, extra || {});
+        }
+
+        async function generateSessionReplies(sessionId, options) {
+            const session = getSessionById(sessionId);
+            if (!session || !session.systemChatKey) return [];
+            const payload = options && options.payload ? options.payload : await readSessionDeliveryPayload(session);
+            if (!payload || !Array.isArray(payload.customReplies) || payload.customReplies.length === 0) return [];
+
+            const config = getSystemSessionDeliveryConfig(session);
+            const eventTimestamp = Number(options && options.eventTimestamp) || Date.now();
+            const plannedCount = Math.max(1, Number(options && options.messageCount) || (config.batchMin + Math.floor(Math.random() * (config.batchMax - config.batchMin + 1))));
+            const messagesToAdd = [];
+            const emojiPool = Array.isArray(payload.customEmojis) ? payload.customEmojis.filter(Boolean) : [];
+            const stickerPool = Array.isArray(payload.stickerLibrary) ? payload.stickerLibrary.filter(Boolean) : [];
+
+            if (session.systemChatType === 'group') {
+                const members = (typeof groupChatSettings !== 'undefined' && Array.isArray(groupChatSettings.members))
+                    ? groupChatSettings.members.filter(Boolean)
+                    : [];
+                if (members.length === 0) return [];
+                const speakerCount = Math.min(members.length, Math.max(1, Number(options && options.speakerCount) || (config.groupSpeakerMin + Math.floor(Math.random() * (config.groupSpeakerMax - config.groupSpeakerMin + 1)))));
+                const selectedMembers = members
+                    .slice()
+                    .sort(function() { return Math.random() - 0.5; })
+                    .slice(0, speakerCount);
+
+                for (let index = 0; index < plannedCount; index++) {
+                    const member = selectedMembers[index % selectedMembers.length];
+                    let replyText = pickReplyTextForSpeaker(payload, member.name);
+                    if (!replyText) continue;
+                    if (emojiPool.length > 0 && Math.random() < 0.18) {
+                        const emoji = pickRandomFromArray(emojiPool);
+                        replyText = Math.random() < 0.5 ? `${emoji} ${replyText}` : `${replyText} ${emoji}`;
+                    }
+                    const timestamp = eventTimestamp + index * (12000 + Math.floor(Math.random() * 24000));
+                    messagesToAdd.push(buildGeneratedMessage(session, member.name || payload.settings.partnerName || '群成员', replyText, timestamp));
+                    if (stickerPool.length > 0 && Math.random() < 0.16) {
+                        messagesToAdd.push(buildGeneratedMessage(session, member.name || payload.settings.partnerName || '群成员', '', timestamp + 6000, {
+                            image: pickRandomFromArray(stickerPool)
+                        }));
+                    }
+                }
+                return messagesToAdd;
+            }
+
+            const roleMember = session.systemRoleId ? getGroupMemberByRoleId(session.systemRoleId) : null;
+            const senderName = (roleMember && roleMember.name) || payload.settings.partnerName || session.name || '对方';
+            for (let index = 0; index < plannedCount; index++) {
+                let replyText = pickReplyTextForSpeaker(payload, senderName);
+                if (!replyText) continue;
+                if (emojiPool.length > 0 && Math.random() < 0.18) {
+                    const emoji = pickRandomFromArray(emojiPool);
+                    replyText = Math.random() < 0.5 ? `${emoji} ${replyText}` : `${replyText} ${emoji}`;
+                }
+                const timestamp = eventTimestamp + index * (18000 + Math.floor(Math.random() * 30000));
+                messagesToAdd.push(buildGeneratedMessage(session, senderName, replyText, timestamp));
+                if (stickerPool.length > 0 && Math.random() < 0.14) {
+                    messagesToAdd.push(buildGeneratedMessage(session, senderName, '', timestamp + 7000, {
+                        image: pickRandomFromArray(stickerPool)
+                    }));
+                }
+            }
+
+            return messagesToAdd;
+        }
+
+        async function deliverOffscreenReplies(sessionId, options) {
+            const session = getSessionById(sessionId);
+            if (!session || !session.systemChatKey || session.id === SESSION_ID) return 0;
+            const config = getSystemSessionDeliveryConfig(session);
+            if (!backgroundSchedulerState.schedulerEnabled || !config.enabled || !config.allowOffscreenDelivery) return 0;
+
+            const payload = await readSessionDeliveryPayload(session);
+            if (!payload) return 0;
+            const generated = await generateSessionReplies(sessionId, {
+                payload: payload,
+                eventTimestamp: options && options.eventTimestamp
+            });
+            if (!generated.length) return 0;
+
+            const nextMessages = payload.messages.concat(generated);
+            await localforage.setItem(`${APP_PREFIX}${session.id}_chatMessages`, nextMessages);
+            await syncSessionSummary(session.id, {
+                messages: nextMessages,
+                incrementUnread: generated.length,
+                persist: false
+            });
+
+            const key = getBackgroundDeliveryConfigKey(session);
+            const nextConfig = normalizeDeliveryConfig(session, backgroundDeliveryState[key]);
+            nextConfig.lastGeneratedAt = generated[generated.length - 1].timestamp.getTime();
+            nextConfig.pendingUnread = Math.max(0, Number(session.unreadCount || 0) || 0);
+            nextConfig.nextDueAt = scheduleNextDeliveryAt(nextConfig, nextConfig.lastGeneratedAt);
+            backgroundDeliveryState[key] = nextConfig;
+
+            await Promise.all([
+                persistSessionList(),
+                persistBackgroundDeliveryState()
+            ]);
+
+            if (!config.muteSoundWhenInactive && typeof playSound === 'function') {
+                playSound('message');
+            }
+            if (typeof window._sendPartnerNotification === 'function') {
+                const lastMessage = generated[generated.length - 1];
+                window._sendPartnerNotification(lastMessage.sender || session.name || '传讯', lastMessage.image ? '[图片]' : (lastMessage.text || '发来了消息'));
+            }
+
+            if (typeof renderSessionList === 'function') renderSessionList();
+            if (typeof updateUI === 'function') updateUI();
+            return generated.length;
+        }
+
+        async function ensureBackgroundDeliveryState() {
+            backgroundSchedulerState = normalizeSchedulerState(await localforage.getItem(getBackgroundSchedulerStateKey()));
+            const savedState = await localforage.getItem(getBackgroundDeliveryStateKey());
+            backgroundDeliveryState = savedState && typeof savedState === 'object' ? savedState : {};
+            let changed = false;
+
+            sessionList.forEach(function(session) {
+                if (!session || !session.systemChatKey) return;
+                const key = getBackgroundDeliveryConfigKey(session);
+                const nextConfig = normalizeDeliveryConfig(session, backgroundDeliveryState[key]);
+                if (!nextConfig.nextDueAt) {
+                    const base = nextConfig.lastGeneratedAt || Date.now();
+                    nextConfig.nextDueAt = scheduleNextDeliveryAt(nextConfig, base);
+                }
+                if (JSON.stringify(backgroundDeliveryState[key] || {}) !== JSON.stringify(nextConfig)) {
+                    backgroundDeliveryState[key] = nextConfig;
+                    changed = true;
+                }
+            });
+
+            Object.keys(backgroundDeliveryState).forEach(function(key) {
+                const stillExists = sessionList.some(function(session) {
+                    return getBackgroundDeliveryConfigKey(session) === key;
+                });
+                if (!stillExists) {
+                    delete backgroundDeliveryState[key];
+                    changed = true;
+                }
+            });
+
+            if (changed) {
+                await persistBackgroundDeliveryState();
+            }
+            await persistBackgroundSchedulerState();
+        }
+
+        async function runBackgroundDeliveryTick() {
+            if (backgroundDeliveryInFlight || !backgroundSchedulerState.schedulerEnabled) return;
+            backgroundDeliveryInFlight = true;
+            try {
+                const now = Date.now();
+                const systemSessions = window.getSystemChatSessions();
+                for (const entry of systemSessions) {
+                    const session = entry && entry.session;
+                    if (!session || session.id === SESSION_ID) continue;
+                    const config = getSystemSessionDeliveryConfig(session);
+                    if (!config.enabled || !config.allowOffscreenDelivery) continue;
+                    if (!config.nextDueAt || now < Number(config.nextDueAt)) continue;
+                    await deliverOffscreenReplies(session.id, { eventTimestamp: Number(config.nextDueAt) || now });
+                }
+            } catch (error) {
+                console.warn('[background-delivery] tick 失败:', error);
+            } finally {
+                backgroundDeliveryInFlight = false;
+            }
+        }
+
+        async function runCatchupDelivery() {
+            if (backgroundDeliveryInFlight || !backgroundSchedulerState.schedulerEnabled || !backgroundSchedulerState.catchupEnabled) return;
+            backgroundDeliveryInFlight = true;
+            const now = Date.now();
+            const maxWindowMs = backgroundSchedulerState.maxCatchupWindowHours * 60 * 60 * 1000;
+            const systemSessions = window.getSystemChatSessions();
+            let changed = false;
+            try {
+                for (const entry of systemSessions) {
+                    const session = entry && entry.session;
+                    if (!session || session.id === SESSION_ID) continue;
+                    const key = getBackgroundDeliveryConfigKey(session);
+                    const config = getSystemSessionDeliveryConfig(session);
+                    if (!config.enabled || !config.allowOffscreenDelivery) continue;
+
+                    let cursor = Number(config.nextDueAt || 0);
+                    if (!cursor) {
+                        backgroundDeliveryState[key] = Object.assign({}, config, {
+                            nextDueAt: scheduleNextDeliveryAt(config, now)
+                        });
+                        changed = true;
+                        continue;
+                    }
+
+                    const earliest = now - maxWindowMs;
+                    if (cursor < earliest) cursor = earliest;
+                    let deliveredCount = 0;
+                    while (cursor <= now && deliveredCount < backgroundSchedulerState.maxCatchupMessagesPerSession) {
+                        const before = deliveredCount;
+                        deliveredCount += await deliverOffscreenReplies(session.id, { eventTimestamp: cursor });
+                        const latestConfig = getSystemSessionDeliveryConfig(session);
+                        cursor = Number(latestConfig.nextDueAt || scheduleNextDeliveryAt(latestConfig, cursor));
+                        if (deliveredCount === before) break;
+                    }
+                }
+                if (changed) {
+                    await persistBackgroundDeliveryState();
+                }
+            } finally {
+                backgroundDeliveryInFlight = false;
+            }
+        }
+
+        function manageBackgroundDeliveryTimer() {
+            if (backgroundDeliveryTimer) {
+                clearInterval(backgroundDeliveryTimer);
+                backgroundDeliveryTimer = null;
+            }
+            if (!backgroundSchedulerState.schedulerEnabled) return;
+            backgroundDeliveryTimer = setInterval(function() {
+                runBackgroundDeliveryTick();
+            }, backgroundSchedulerState.tickIntervalSeconds * 1000);
+        }
+
+        window.getSessionListTimeLabel = formatSessionTimestamp;
+        window.getUnreadSessionCount = getUnreadSessionCount;
+        window.generateSessionReplies = generateSessionReplies;
+        window.runCatchupDelivery = runCatchupDelivery;
+        window.manageBackgroundDeliveryTimer = manageBackgroundDeliveryTimer;
+        window.persistBackgroundSchedulerState = persistBackgroundSchedulerState;
+        window.persistBackgroundDeliveryState = persistBackgroundDeliveryState;
 
         function getGroupMemberByRoleId(roleId) {
             if (!roleId) return null;
@@ -445,6 +1076,11 @@ autoSendInterval: 5,
                         id: makeSessionId(),
                         name: definitions[0].name,
                         createdAt: Date.now(),
+                        unreadCount: 0,
+                        lastMessagePreview: '',
+                        lastMessageAt: null,
+                        lastVisitedAt: Date.now(),
+                        lastReadAt: Date.now(),
                         systemChatKey: 'group',
                         systemChatType: 'group'
                     };
@@ -464,6 +1100,11 @@ autoSendInterval: 5,
                     id: makeSessionId(),
                     name: definition.name,
                     createdAt: Date.now(),
+                    unreadCount: 0,
+                    lastMessagePreview: '',
+                    lastMessageAt: null,
+                    lastVisitedAt: Date.now(),
+                    lastReadAt: Date.now(),
                     systemChatKey: definition.key,
                     systemChatType: definition.type,
                     systemRoleId: definition.roleId || null
@@ -475,7 +1116,7 @@ autoSendInterval: 5,
             });
 
             if (changed) {
-                await localforage.setItem(`${APP_PREFIX}sessionList`, sessionList);
+                await persistSessionList();
             }
 
             for (const session of createdSessions) {
@@ -578,6 +1219,7 @@ autoSendInterval: 5,
             syncChatModeStateFromSession(targetSession);
             await persistChatModeState();
             await loadData();
+            await syncSessionSummary(SESSION_ID, { messages: messages, markRead: true });
             if (options.notify !== false) {
                 showNotification('已切换到 ' + (targetSession.name || '新聊天'), 'success', 1500);
             }
@@ -621,6 +1263,201 @@ autoSendInterval: 5,
                     + '<span style="font-size:11px;color:' + (active ? 'var(--accent-color)' : 'var(--text-secondary)') + ';font-weight:600;">' + (active ? '当前' : '切换') + '</span>'
                     + '</button>';
             }).join('');
+        };
+
+        function renderBackgroundDeliveryOverview() {
+            const btn = DOMElements.sessionModal && DOMElements.sessionModal.deliveryToggleBtn;
+            const text = DOMElements.sessionModal && DOMElements.sessionModal.deliveryToggleText;
+            if (!btn || !text) return;
+            const enabled = !!backgroundSchedulerState.schedulerEnabled;
+            btn.classList.toggle('disabled', !enabled);
+            text.textContent = enabled ? '后台来消息：开' : '后台来消息：关';
+        }
+
+        function renderDeliverySettingsModal(sessionId) {
+            const modalContent = DOMElements.deliverySettingsModal && DOMElements.deliverySettingsModal.content;
+            if (!modalContent) return;
+            const session = getSessionById(sessionId);
+            if (!session) return;
+            const config = getSystemSessionDeliveryConfig(session);
+            const isGroup = session.systemChatType === 'group';
+            modalContent.innerHTML = `
+                <div class="delivery-settings-header">
+                    <div class="delivery-settings-copy">
+                        <strong>${session.name} · 后台消息</strong>
+                        <span>${isGroup ? '群聊会按参与人数配置生成多人消息。' : '单聊会按这个角色的独立节奏来消息。'}</span>
+                    </div>
+                    <button class="session-delivery-toggle ${config.enabled ? '' : 'disabled'}" id="delivery-enabled-toggle" type="button">${config.enabled ? '已开启' : '已关闭'}</button>
+                </div>
+                <div class="delivery-card">
+                    <div class="delivery-card-title">活跃档位</div>
+                    <div class="delivery-profile-grid">
+                        <button class="delivery-profile-btn ${config.profile === 'quiet' ? 'active' : ''}" data-profile="quiet" type="button">安静</button>
+                        <button class="delivery-profile-btn ${config.profile === 'balanced' ? 'active' : ''}" data-profile="balanced" type="button">均衡</button>
+                        <button class="delivery-profile-btn ${config.profile === 'lively' ? 'active' : ''}" data-profile="lively" type="button">热闹</button>
+                    </div>
+                </div>
+                <div class="delivery-card">
+                    <div class="delivery-card-title">发送间隔</div>
+                    <div class="delivery-range-row">
+                        <div class="delivery-range-head">
+                            <span>最短等待</span>
+                            <span class="delivery-range-values" id="delivery-interval-min-value">${formatMinutesLabel(config.intervalMinMinutes)}</span>
+                        </div>
+                        <input type="range" min="1" max="240" step="1" value="${config.intervalMinMinutes}" id="delivery-interval-min-slider" class="font-size-slider">
+                    </div>
+                    <div class="delivery-range-row">
+                        <div class="delivery-range-head">
+                            <span>最长等待</span>
+                            <span class="delivery-range-values" id="delivery-interval-max-value">${formatMinutesLabel(config.intervalMaxMinutes)}</span>
+                        </div>
+                        <input type="range" min="${config.intervalMinMinutes}" max="360" step="1" value="${config.intervalMaxMinutes}" id="delivery-interval-max-slider" class="font-size-slider">
+                    </div>
+                </div>
+                <div class="delivery-card">
+                    <div class="delivery-card-title">每次消息数</div>
+                    <div class="delivery-dual-range">
+                        <div class="delivery-range-row">
+                            <div class="delivery-range-head">
+                                <span>最少</span>
+                                <span class="delivery-range-values" id="delivery-batch-min-value">${config.batchMin} 条</span>
+                            </div>
+                            <input type="range" min="1" max="5" step="1" value="${config.batchMin}" id="delivery-batch-min-slider" class="font-size-slider">
+                        </div>
+                        <div class="delivery-range-row">
+                            <div class="delivery-range-head">
+                                <span>最多</span>
+                                <span class="delivery-range-values" id="delivery-batch-max-value">${config.batchMax} 条</span>
+                            </div>
+                            <input type="range" min="${config.batchMin}" max="6" step="1" value="${config.batchMax}" id="delivery-batch-max-slider" class="font-size-slider">
+                        </div>
+                    </div>
+                </div>
+                ${isGroup ? `
+                <div class="delivery-card">
+                    <div class="delivery-card-title">群聊参与人数</div>
+                    <div class="delivery-dual-range">
+                        <div class="delivery-range-row">
+                            <div class="delivery-range-head">
+                                <span>最少</span>
+                                <span class="delivery-range-values" id="delivery-speaker-min-value">${config.groupSpeakerMin} 人</span>
+                            </div>
+                            <input type="range" min="1" max="5" step="1" value="${config.groupSpeakerMin}" id="delivery-speaker-min-slider" class="font-size-slider">
+                        </div>
+                        <div class="delivery-range-row">
+                            <div class="delivery-range-head">
+                                <span>最多</span>
+                                <span class="delivery-range-values" id="delivery-speaker-max-value">${config.groupSpeakerMax} 人</span>
+                            </div>
+                            <input type="range" min="${config.groupSpeakerMin}" max="5" step="1" value="${config.groupSpeakerMax}" id="delivery-speaker-max-slider" class="font-size-slider">
+                        </div>
+                    </div>
+                </div>` : ''}
+                <div class="delivery-switch-row" id="delivery-sound-toggle">
+                    <div class="delivery-switch-copy">
+                        <strong>后台消息静音</strong>
+                        <span>关闭后，非当前聊天来消息时也会提示音。</span>
+                    </div>
+                    <div class="setting-pill-switch ${config.muteSoundWhenInactive ? 'active' : ''}"><div class="setting-pill-knob"></div></div>
+                </div>
+                <div class="modal-buttons">
+                    <button class="modal-btn modal-btn-secondary" id="cancel-delivery-settings">关闭</button>
+                </div>
+            `;
+
+            const key = getBackgroundDeliveryConfigKey(session);
+            const applyConfigPatch = async function(patch) {
+                const currentConfig = getSystemSessionDeliveryConfig(session);
+                const nextConfig = normalizeDeliveryConfig(session, Object.assign({}, currentConfig, patch || {}));
+                if (!nextConfig.nextDueAt || patch.intervalMinMinutes || patch.intervalMaxMinutes || patch.enabled !== undefined || patch.profile) {
+                    const base = nextConfig.lastGeneratedAt || Date.now();
+                    nextConfig.nextDueAt = scheduleNextDeliveryAt(nextConfig, base);
+                }
+                backgroundDeliveryState[key] = nextConfig;
+                await persistBackgroundDeliveryState();
+                renderDeliverySettingsModal(sessionId);
+                renderBackgroundDeliveryOverview();
+                if (typeof renderSessionList === 'function') renderSessionList();
+                manageBackgroundDeliveryTimer();
+            };
+
+            const enabledToggle = document.getElementById('delivery-enabled-toggle');
+            if (enabledToggle) {
+                enabledToggle.addEventListener('click', function() {
+                    applyConfigPatch({ enabled: !config.enabled });
+                });
+            }
+
+            modalContent.querySelectorAll('[data-profile]').forEach(function(button) {
+                button.addEventListener('click', function() {
+                    const profile = button.dataset.profile;
+                    applyConfigPatch(getDeliveryProfileDefaults(profile, session));
+                });
+            });
+
+            const bindDualRange = function(minId, maxId, minLabelId, maxLabelId, formatter) {
+                const minSlider = document.getElementById(minId);
+                const maxSlider = document.getElementById(maxId);
+                const minLabel = document.getElementById(minLabelId);
+                const maxLabel = document.getElementById(maxLabelId);
+                if (!minSlider || !maxSlider || !minLabel || !maxLabel) return;
+
+                const syncLabels = function() {
+                    if (Number(minSlider.value) > Number(maxSlider.value)) {
+                        maxSlider.value = minSlider.value;
+                    }
+                    maxSlider.min = minSlider.value;
+                    minLabel.textContent = formatter(Number(minSlider.value));
+                    maxLabel.textContent = formatter(Number(maxSlider.value));
+                };
+
+                syncLabels();
+                minSlider.addEventListener('input', syncLabels);
+                maxSlider.addEventListener('input', syncLabels);
+                minSlider.addEventListener('change', function() {
+                    const patch = {};
+                    patch[minId.includes('interval') ? 'intervalMinMinutes' : (minId.includes('speaker') ? 'groupSpeakerMin' : 'batchMin')] = Number(minSlider.value);
+                    patch[maxId.includes('interval') ? 'intervalMaxMinutes' : (maxId.includes('speaker') ? 'groupSpeakerMax' : 'batchMax')] = Number(maxSlider.value);
+                    applyConfigPatch(patch);
+                });
+                maxSlider.addEventListener('change', function() {
+                    const patch = {};
+                    patch[minId.includes('interval') ? 'intervalMinMinutes' : (minId.includes('speaker') ? 'groupSpeakerMin' : 'batchMin')] = Number(minSlider.value);
+                    patch[maxId.includes('interval') ? 'intervalMaxMinutes' : (maxId.includes('speaker') ? 'groupSpeakerMax' : 'batchMax')] = Number(maxSlider.value);
+                    applyConfigPatch(patch);
+                });
+            };
+
+            bindDualRange('delivery-interval-min-slider', 'delivery-interval-max-slider', 'delivery-interval-min-value', 'delivery-interval-max-value', formatMinutesLabel);
+            bindDualRange('delivery-batch-min-slider', 'delivery-batch-max-slider', 'delivery-batch-min-value', 'delivery-batch-max-value', function(value) {
+                return `${value} 条`;
+            });
+            if (isGroup) {
+                bindDualRange('delivery-speaker-min-slider', 'delivery-speaker-max-slider', 'delivery-speaker-min-value', 'delivery-speaker-max-value', function(value) {
+                    return `${value} 人`;
+                });
+            }
+
+            const soundToggle = document.getElementById('delivery-sound-toggle');
+            if (soundToggle) {
+                soundToggle.addEventListener('click', function() {
+                    applyConfigPatch({ muteSoundWhenInactive: !getSystemSessionDeliveryConfig(session).muteSoundWhenInactive });
+                });
+            }
+
+            const closeBtn = document.getElementById('cancel-delivery-settings');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    hideModal(DOMElements.deliverySettingsModal.modal);
+                });
+            }
+        }
+
+        window.openSessionDeliverySettings = function(sessionId) {
+            renderDeliverySettingsModal(sessionId);
+            if (DOMElements.deliverySettingsModal && DOMElements.deliverySettingsModal.modal) {
+                showModal(DOMElements.deliverySettingsModal.modal);
+            }
         };
 
         function hideTypingIndicator() {
@@ -765,7 +1602,7 @@ autoSendInterval: 5,
         };
 
 
-const loadData = async () => {
+        const loadData = async () => {
     try {
         settings = getDefaultSettings();
 
@@ -908,6 +1745,7 @@ const loadData = async () => {
         }
 
         applyCurrentChatModeContext();
+        await syncSessionSummary(SESSION_ID, { messages: messages, markRead: true });
 
         if (savedChatBg) {
             applyBackground(savedChatBg);
@@ -927,9 +1765,13 @@ const loadData = async () => {
         setTimeout(() => {
             applyAllAvatarFrames();
             manageAutoSendTimer(); 
+            manageBackgroundDeliveryTimer();
             checkEnvelopeStatus(); 
             renderBuildInfoPanel();
             updateUI();
+            runCatchupDelivery().catch(function(error) {
+                console.warn('[background-delivery] 补发失败:', error);
+            });
             if (settings.customBubbleCss) {
                 try { applyCustomBubbleCss(settings.customBubbleCss); } catch(e) {}
             }
@@ -1063,6 +1905,8 @@ const saveData = async () => {
         console.warn('[saveData] SESSION_ID 尚未初始化，跳过保存以防数据写入临时 key');
         return;
     }
+
+    await syncSessionSummary(SESSION_ID, { messages: messages, markRead: document.visibilityState === 'visible', persist: true });
 
     const promises = [
         { key: 'chatSettings',           val: () => localforage.setItem(getStorageKey('chatSettings'), settings) },
@@ -1331,9 +2175,6 @@ function manageAutoSendTimer() {
             DOMElements.me.name.textContent = settings.myName;
             DOMElements.partner.status.textContent = settings.partnerStatus || '在线';
             DOMElements.me.statusText.textContent = settings.myStatus;
-            if (DOMElements.chatModeModal && DOMElements.chatModeModal.openBtn) {
-                DOMElements.chatModeModal.openBtn.classList.toggle('active', !window.isGroupChatMode());
-            }
             if (typeof window.updateDynamicNames === 'function') window.updateDynamicNames();
             document.documentElement.style.setProperty('--font-size', `${settings.fontSize}px`);
             
@@ -1382,7 +2223,16 @@ function manageAutoSendTimer() {
             const _immToggle = document.getElementById('immersive-toggle');
             if (_immToggle) _immToggle.classList.toggle('active', document.body.classList.contains('immersive-mode'));
 
+            const unreadBadge = document.getElementById('session-manager-badge');
+            const unreadCount = getUnreadSessionCount();
+            if (unreadBadge) {
+                unreadBadge.hidden = unreadCount <= 0;
+                unreadBadge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+            }
+
+            renderBackgroundDeliveryOverview();
             if (typeof renderChatModeList === 'function') renderChatModeList();
+            if (typeof renderSessionList === 'function') renderSessionList();
             renderMessages();
         };
 
@@ -1757,6 +2607,9 @@ const addMessage = (message) => {
         container.scrollTop = container.scrollHeight;
     });
 
+    syncSessionSummary(SESSION_ID, { messages: messages, markRead: true }).catch(function(error) {
+        console.warn('[session] 更新聊天列表摘要失败:', error);
+    });
     throttledSaveData();
 };
 
@@ -2800,7 +3653,7 @@ window.initializeSession = async function() {
     await migrateData();
 
     const sessionsData = await localforage.getItem(`${APP_PREFIX}sessionList`);
-    sessionList = sessionsData || [];
+    sessionList = Array.isArray(sessionsData) ? sessionsData.map(normalizeSessionRecord).filter(Boolean) : [];
     chatModeState = normalizeChatModeState(await localforage.getItem(getChatModeStateKey()));
 
     const hash = window.location.hash.substring(1);
@@ -2814,6 +3667,8 @@ window.initializeSession = async function() {
     }
 
     await ensureSystemChatSessions(SESSION_ID);
+    await ensureBackgroundDeliveryState();
+    await hydrateSessionSummaries();
     const currentSession = getCurrentSessionMeta();
     if (currentSession && currentSession.systemChatKey) {
         syncChatModeStateFromSession(currentSession);

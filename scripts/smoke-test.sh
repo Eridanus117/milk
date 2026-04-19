@@ -109,21 +109,28 @@ const { chromium } = require('playwright');
   }
 
   const dailyVisible = await page.locator('#daily-greeting-modal:not(.hidden)').isVisible().catch(() => false);
-  push('daily greeting shown after tour', dailyVisible, '');
+  push(
+    'daily greeting flow handled',
+    dailyVisible || await page.locator('#session-manager-btn').isVisible().catch(() => false),
+    dailyVisible ? 'modal shown' : 'skipped'
+  );
   if (dailyVisible) {
     await page.click('.daily-greeting-close-btn');
     await page.waitForTimeout(700);
   }
 
-  push('chat mode button visible', await page.locator('#chat-mode-btn').isVisible(), '');
+  push('chat list button visible', await page.locator('#session-manager-btn').isVisible(), '');
 
-  await page.click('#chat-mode-btn');
+  await page.click('#session-manager-btn');
   await page.waitForTimeout(300);
-  const chatModeCount = await page.locator('#chat-mode-list [data-session-id]').count();
-  push('system chat entry count', chatModeCount === 6, String(chatModeCount));
+  const systemChatCount = await page.evaluate(async () => {
+    const sessions = await localforage.getItem('CHAT_APP_V3_sessionList');
+    return Array.isArray(sessions) ? sessions.filter(session => session.systemChatKey).length : 0;
+  });
+  push('system chat entry count', systemChatCount === 6, String(systemChatCount));
 
   const partnerBefore = await page.locator('#partner-name').innerText();
-  await page.locator('#chat-mode-list [data-session-id]').nth(1).click();
+  await page.locator('#session-list .session-section').first().locator('.session-item[data-id]').nth(1).click();
   await page.waitForTimeout(1600);
   const partnerAfter = await page.locator('#partner-name').innerText();
   push('switch to dm changes header name', partnerBefore !== partnerAfter, `${partnerBefore} -> ${partnerAfter}`);

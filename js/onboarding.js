@@ -431,8 +431,8 @@ const tourSteps = [
     },
     {
         element: '#session-manager-btn',
-        title: "📂 会话管理",
-        content: "你可以创建<b>多个独立的聊天会话</b>，每个会话都有独立的聊天记录。<br>",
+        title: "💬 聊天列表",
+        content: "这里会像聊天软件一样展示<b>群聊 + 五个角色单聊</b>，也能看到最近消息和未读红点。<br>",
         position: 'bottom'
     },
     {
@@ -567,7 +567,12 @@ async function createNewSession(switchToIt = true) {
     const newSession = {
         id: newId,
         name: `会话 ${new Date().toLocaleDateString()}`,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        unreadCount: 0,
+        lastMessagePreview: '',
+        lastMessageAt: null,
+        lastVisitedAt: Date.now(),
+        lastReadAt: Date.now()
     };
 
     sessionList.push(newSession);
@@ -909,4 +914,3 @@ function setupTutorialListeners() {
         });
     }
 }
-

@@ -151,27 +151,100 @@ function renderStatsContent() {
                 listContainer.innerHTML = '<div class="stats-empty" style="padding: 20px 0;"><p>还没有会话</p></div>';
                 return;
             }
-            listContainer.innerHTML = sessionList.map(session => {
-            const isSystemChat = !!session.systemChatKey;
-            const chatTag = isSystemChat
-                ? `<span style="font-size:10px;color:var(--accent-color);background:rgba(var(--accent-color-rgb),0.12);padding:2px 6px;border-radius:999px;font-weight:600;">${session.systemChatType === 'group' ? '系统群聊' : '系统单聊'}</span>`
-                : '';
-            const actionHtml = isSystemChat
-                ? `<span style="font-size:11px;color:var(--text-secondary);">受保护</span>`
-                : `<button class="session-action-btn rename" title="重命名"><i class="fas fa-pen"></i></button>
-            <button class="session-action-btn delete" title="删除"><i class="fas fa-trash"></i></button>`;
-            return `
-            <div class="session-item ${session.id === SESSION_ID ? 'active': ''}" data-id="${session.id}">
-            <div class="session-info">
-            <div class="session-name" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${session.name}${chatTag}</div>
-            <div class="session-meta">创建于 ${new Date(session.createdAt).toLocaleDateString()}</div>
-            </div>
-            <div class="session-actions">
-            ${actionHtml}
-            </div>
-            </div>
+            const defaultPreview = function(session) {
+                if (!session || !session.systemChatKey) return '独立保存的自定义聊天';
+                return session.systemChatType === 'group' ? '群聊，多人同屏回复' : '单聊，角色独立记录';
+            };
+            const sessionAvatar = function(session) {
+                if (!session || !session.systemChatKey) {
+                    return '<div class="session-avatar"><i class="fas fa-comment-dots"></i></div>';
+                }
+                if (session.systemChatType === 'group') {
+                    return '<div class="session-avatar system-group"><i class="fas fa-users"></i></div>';
+                }
+                const defs = typeof window.getSystemChatSessions === 'function' ? window.getSystemChatSessions() : [];
+                const entry = defs.find(function(item) {
+                    return item && item.session && item.session.id === session.id;
+                });
+                const member = entry ? entry.member : null;
+                const avatarSrc = member && typeof window.getGroupMemberAvatar === 'function'
+                    ? window.getGroupMemberAvatar(member)
+                    : (member && member.avatar ? member.avatar : null);
+                if (avatarSrc) {
+                    return '<div class="session-avatar"><img src="' + avatarSrc + '" alt="' + (session.name || '聊天') + '"></div>';
+                }
+                return '<div class="session-avatar"><i class="fas fa-user"></i></div>';
+            };
+            const renderSessionItem = function(session) {
+                const isSystemChat = !!session.systemChatKey;
+                const unreadCount = session.id === SESSION_ID ? 0 : Math.max(0, Number(session.unreadCount || 0) || 0);
+                const unreadHtml = unreadCount > 0
+                    ? '<span class="session-unread-dot">' + (unreadCount > 99 ? '99+' : unreadCount) + '</span>'
+                    : '';
+                const chatTag = isSystemChat
+                    ? '<span class="session-tag">' + (session.systemChatType === 'group' ? '群聊' : '单聊') + '</span>'
+                    : '<span class="session-tag">自定义</span>';
+                const preview = session.lastMessagePreview || defaultPreview(session);
+                const timeLabel = typeof window.getSessionListTimeLabel === 'function'
+                    ? window.getSessionListTimeLabel(session.lastMessageAt || session.createdAt)
+                    : new Date(session.createdAt).toLocaleDateString();
+                const actionHtml = isSystemChat
+                    ? ('<button class="session-action-btn delivery" title="后台消息设置"><i class="fas fa-bell"></i></button>'
+                        + (session.systemChatType === 'group'
+                            ? '<button class="session-action-btn textual group-settings" title="群聊设置">群聊</button>'
+                            : '<span class="session-meta">系统入口</span>'))
+                    : '<button class="session-action-btn rename" title="重命名"><i class="fas fa-pen"></i></button>'
+                        + '<button class="session-action-btn delete" title="删除"><i class="fas fa-trash"></i></button>';
+                return `
+            <div class="session-item ${session.id === SESSION_ID ? 'active' : ''}" data-id="${session.id}">
+                <div class="session-avatar-wrap" style="position:relative;">
+                    ${sessionAvatar(session)}
+                    ${unreadHtml}
+                </div>
+                <div class="session-info">
+                    <div class="session-name">
+                        <span class="session-name-text">${session.name}</span>
+                        ${chatTag}
+                    </div>
+                    <div class="session-preview-row">
+                        <div class="session-preview">${preview}</div>
+                        <div class="session-meta">${timeLabel}</div>
+                    </div>
+                </div>
+                <div class="session-actions">
+                    ${actionHtml}
+                </div>
+            </div>`;
+            };
+
+            const systemSessions = sessionList
+                .filter(session => session && session.systemChatKey)
+                .sort((a, b) => {
+                    const aOrder = a.systemChatType === 'group' ? 0 : 1;
+                    const bOrder = b.systemChatType === 'group' ? 0 : 1;
+                    if (aOrder !== bOrder) return aOrder - bOrder;
+                    return (a.createdAt || 0) - (b.createdAt || 0);
+                });
+            const customSessions = sessionList
+                .filter(session => session && !session.systemChatKey)
+                .sort((a, b) => (b.lastMessageAt || b.createdAt || 0) - (a.lastMessageAt || a.createdAt || 0));
+
+            listContainer.innerHTML = `
+                <div class="session-section">
+                    <div class="session-section-title">
+                        <span>聊天入口</span>
+                        <span class="session-section-hint">群聊 + 五个角色单聊</span>
+                    </div>
+                    ${systemSessions.map(renderSessionItem).join('')}
+                </div>
+                <div class="session-section">
+                    <div class="session-section-title">
+                        <span>自定义会话</span>
+                        <span class="session-section-hint">${customSessions.length ? customSessions.length + ' 个' : '可选'}</span>
+                    </div>
+                    ${customSessions.length ? customSessions.map(renderSessionItem).join('') : '<div class="session-empty-hint">还没有自定义会话，需要时再新建。</div>'}
+                </div>
             `;
-            }).join('');
         }
 
 

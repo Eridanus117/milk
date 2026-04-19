@@ -122,6 +122,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 } catch (e) {
                     console.warn('[visibilitychange] 检查新版本失败:', e);
                 }
+                try {
+                    if (typeof runCatchupDelivery === 'function') runCatchupDelivery();
+                    if (typeof manageBackgroundDeliveryTimer === 'function') manageBackgroundDeliveryTimer();
+                } catch (e) {
+                    console.warn('[visibilitychange] 后台消息补发失败:', e);
+                }
             }
         });
 

@@ -8,6 +8,10 @@
         let autoSendTimer = null; 
         let sessionList = [];
         let chatModeState = { mode: 'group', activeRoleId: null };
+        let backgroundDeliveryState = {};
+        let backgroundSchedulerState = {};
+        let backgroundDeliveryTimer = null;
+        let backgroundDeliveryInFlight = false;
         let buildInfoState = {
             current: window.__BUILD_INFO__ || null,
             remote: null,
@@ -125,7 +129,13 @@
                 managerBtn: document.getElementById('session-manager-btn'),
                 list: document.getElementById('session-list'),
                 createBtn: document.getElementById('create-new-session'),
-                cancelBtn: document.getElementById('cancel-session')
+                cancelBtn: document.getElementById('cancel-session'),
+                deliveryToggleBtn: document.getElementById('session-delivery-master-toggle'),
+                deliveryToggleText: document.getElementById('session-delivery-master-text')
+            },
+            deliverySettingsModal: {
+                modal: document.getElementById('delivery-settings-modal'),
+                content: document.getElementById('delivery-settings-content')
             },
             fortuneModal: {
                 modal: document.getElementById('fortune-lenormand-modal'),

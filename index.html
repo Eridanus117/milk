@@ -202,9 +202,10 @@
                 </div>
             </div>
             <div class="header-actions">
-                <button id="chat-mode-btn" class="action-btn" title="聊天模式"><i class="fas fa-compass"></i></button>
-                <button id="session-manager-btn" class="action-btn" title="会话管理"><i class="fas fa-comments"></i></button>
-                <button id="group-chat-btn" class="action-btn" title="群聊设置"><i class="fas fa-users"></i></button>
+                <button id="session-manager-btn" class="action-btn" title="聊天列表">
+                    <i class="fas fa-comments"></i>
+                    <span class="header-action-badge" id="session-manager-badge" hidden></span>
+                </button>
                 <button id="daily-greeting-btn" class="action-btn" title="今日公告" onclick="reopenDailyGreeting()"><i class="fas fa-newspaper"></i></button>
                 <button id="theme-toggle" class="action-btn" title="切换主题"><i class="fas fa-moon"></i></button>
                 <button id="settings-btn" class="action-btn" title="设置"><i class="fas fa-cog"></i></button>
@@ -1520,14 +1521,27 @@
     <div class="modal" id="session-modal">
         <div class="modal-content">
             <div class="modal-title">
-                <i class="fas fa-comments"></i><span>会话管理</span>
+                <i class="fas fa-comments"></i><span>聊天列表</span>
+            </div>
+            <div class="session-modal-intro">
+                <div class="session-modal-copy">
+                    <strong>六个系统聊天入口</strong>
+                    <span>像聊天软件一样切换群聊和五个角色单聊，红点会跟随未读状态显示。</span>
+                </div>
+                <button class="session-delivery-toggle" id="session-delivery-master-toggle" type="button">
+                    <span id="session-delivery-master-text">后台来消息：开</span>
+                </button>
             </div>
             <div class="session-list" id="session-list"></div>
             <div class="modal-buttons" style="justify-content: space-between;">
-                <button class="modal-btn modal-btn-primary" id="create-new-session"><i class="fas fa-plus"></i> 新建会话</button>
+                <button class="modal-btn modal-btn-primary" id="create-new-session"><i class="fas fa-plus"></i> 新建自定义会话</button>
                 <button class="modal-btn modal-btn-secondary" id="cancel-session">关闭</button>
             </div>
         </div>
+    </div>
+
+    <div class="modal" id="delivery-settings-modal">
+        <div class="modal-content delivery-settings-content" id="delivery-settings-content"></div>
     </div>
 
     <div class="modal" id="fortune-lenormand-modal">
