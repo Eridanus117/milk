@@ -170,7 +170,7 @@ function loadMoreHistory() {
                 myAvatarShape: 'circle',
                 partnerAvatarShape: 'circle',
 autoSendEnabled: false,
-autoSendInterval: 5,
+autoSendIntervalSeconds: 300,
         allowReadNoReply: false, 
         readNoReplyChance: 0.2,
         timeFormat: 'HH:mm',
@@ -228,48 +228,23 @@ autoSendInterval: 5,
             };
         }
 
-        function getDeliveryProfileDefaults(profile, session) {
-            const normalizedProfile = ['quiet', 'balanced', 'lively'].includes(profile) ? profile : 'balanced';
-            const isGroup = !!(session && session.systemChatType === 'group');
-            const profileMap = {
-                quiet: {
-                    intervalMinMinutes: 20,
-                    intervalMaxMinutes: 45,
-                    batchMin: 1,
-                    batchMax: isGroup ? 2 : 1,
-                    groupSpeakerMin: 1,
-                    groupSpeakerMax: 2
-                },
-                balanced: {
-                    intervalMinMinutes: 8,
-                    intervalMaxMinutes: 20,
-                    batchMin: 1,
-                    batchMax: isGroup ? 3 : 2,
-                    groupSpeakerMin: 2,
-                    groupSpeakerMax: 3
-                },
-                lively: {
-                    intervalMinMinutes: 3,
-                    intervalMaxMinutes: 10,
-                    batchMin: 1,
-                    batchMax: isGroup ? 5 : 3,
-                    groupSpeakerMin: 3,
-                    groupSpeakerMax: 5
-                }
-            };
-            return Object.assign({ profile: normalizedProfile }, profileMap[normalizedProfile]);
-        }
-
         function getDefaultDeliveryConfig(session) {
-            const profileDefaults = getDeliveryProfileDefaults('balanced', session);
+            const isGroup = !!(session && session.systemChatType === 'group');
             return Object.assign({
                 enabled: true,
+                restoreOnReturn: true,
                 allowOffscreenDelivery: true,
                 muteSoundWhenInactive: true,
                 lastGeneratedAt: null,
                 nextDueAt: null,
-                pendingUnread: 0
-            }, profileDefaults);
+                pendingUnread: 0,
+                intervalMinSeconds: 30,
+                intervalMaxSeconds: 90,
+                batchMin: 1,
+                batchMax: isGroup ? 3 : 2,
+                groupSpeakerMin: 2,
+                groupSpeakerMax: isGroup ? 3 : 2
+            });
         }
 
         function normalizeSchedulerState(saved) {
@@ -285,12 +260,14 @@ autoSendInterval: 5,
         function normalizeDeliveryConfig(session, saved) {
             const defaults = getDefaultDeliveryConfig(session);
             const source = Object.assign({}, defaults, saved || {});
-            source.profile = ['quiet', 'balanced', 'lively'].includes(source.profile) ? source.profile : defaults.profile;
             source.enabled = source.enabled !== false;
+            source.restoreOnReturn = source.restoreOnReturn !== false;
             source.allowOffscreenDelivery = source.allowOffscreenDelivery !== false;
             source.muteSoundWhenInactive = source.muteSoundWhenInactive !== false;
-            source.intervalMinMinutes = Math.min(240, Math.max(1, Number(source.intervalMinMinutes || defaults.intervalMinMinutes) || defaults.intervalMinMinutes));
-            source.intervalMaxMinutes = Math.min(360, Math.max(source.intervalMinMinutes, Number(source.intervalMaxMinutes || defaults.intervalMaxMinutes) || defaults.intervalMaxMinutes));
+            const minSecondsSource = source.intervalMinSeconds || (source.intervalMinMinutes ? Number(source.intervalMinMinutes) * 60 : defaults.intervalMinSeconds);
+            const maxSecondsSource = source.intervalMaxSeconds || (source.intervalMaxMinutes ? Number(source.intervalMaxMinutes) * 60 : defaults.intervalMaxSeconds);
+            source.intervalMinSeconds = Math.min(3600, Math.max(1, Number(minSecondsSource) || defaults.intervalMinSeconds));
+            source.intervalMaxSeconds = Math.min(7200, Math.max(source.intervalMinSeconds, Number(maxSecondsSource) || defaults.intervalMaxSeconds));
             source.batchMin = Math.min(5, Math.max(1, Number(source.batchMin || defaults.batchMin) || defaults.batchMin));
             source.batchMax = Math.min(6, Math.max(source.batchMin, Number(source.batchMax || defaults.batchMax) || defaults.batchMax));
             source.groupSpeakerMin = Math.min(5, Math.max(1, Number(source.groupSpeakerMin || defaults.groupSpeakerMin) || defaults.groupSpeakerMin));
@@ -505,18 +482,18 @@ autoSendInterval: 5,
 
         function scheduleNextDeliveryAt(config, fromTimestamp) {
             const base = Number(fromTimestamp || Date.now()) || Date.now();
-            const minMs = Math.max(1, Number(config.intervalMinMinutes || 1)) * 60 * 1000;
-            const maxMs = Math.max(minMs, Number(config.intervalMaxMinutes || config.intervalMinMinutes || 1)) * 60 * 1000;
+            const minMs = Math.max(1, Number(config.intervalMinSeconds || 1)) * 1000;
+            const maxMs = Math.max(minMs, Number(config.intervalMaxSeconds || config.intervalMinSeconds || 1)) * 1000;
             return base + minMs + Math.random() * Math.max(0, maxMs - minMs);
         }
 
-        function formatMinutesLabel(minutes) {
-            const value = Math.max(1, Number(minutes || 0) || 1);
+        function formatSecondsLabel(seconds) {
+            const value = Math.max(1, Number(seconds || 0) || 1);
             if (value >= 60) {
-                const hours = value / 60;
-                return Number.isInteger(hours) ? `${hours}小时` : `${hours.toFixed(1)}小时`;
+                const minutes = value / 60;
+                return Number.isInteger(minutes) ? `${minutes}分钟` : `${minutes.toFixed(1)}分钟`;
             }
-            return `${value}分钟`;
+            return `${value}秒`;
         }
 
         function readDisabledTextSet(storageKey) {
@@ -604,6 +581,36 @@ autoSendInterval: 5,
             return pickRandomFromArray(genericPool) || '';
         }
 
+        function buildCurrentSessionReplyPayload() {
+            return {
+                customReplies: Array.isArray(customReplies) ? customReplies.slice() : [],
+                customReplyGroups: Array.isArray(window.customReplyGroups) ? window.customReplyGroups.slice() : [],
+                customEmojis: Array.isArray(customEmojis) ? customEmojis.slice() : [],
+                stickerLibrary: Array.isArray(stickerLibrary) ? stickerLibrary.slice() : []
+            };
+        }
+
+        function pickScopedReplyText(payload, speakerName, options) {
+            const sourcePayload = payload && typeof payload === 'object' ? payload : {};
+            const safeName = String(speakerName || '').trim();
+            if (!safeName) return '';
+            const preferredKinds = Array.isArray(options && options.preferredKinds) && (options.preferredKinds || []).length
+                ? options.preferredKinds
+                : ['role', 'public', 'intimate', 'link'];
+            const buckets = buildSpeakerReplyBucketsFromData(sourcePayload, safeName);
+            for (const kind of preferredKinds) {
+                const picked = pickRandomFromArray(buckets[kind]);
+                if (picked) return String(picked).trim();
+            }
+            const hasStructuredGroups = (Array.isArray(sourcePayload.customReplyGroups) ? sourcePayload.customReplyGroups : []).some(function(group) {
+                return group && Array.isArray(group.items) && (group.scope === 'public' || String(group.speaker || '').trim());
+            });
+            if (!hasStructuredGroups) {
+                return pickReplyTextForSpeaker(sourcePayload, safeName);
+            }
+            return '';
+        }
+
         async function readSessionDeliveryPayload(session) {
             if (!session || !session.id) return null;
             if (session.id === SESSION_ID) {
@@ -680,7 +687,7 @@ autoSendInterval: 5,
 
                 for (let index = 0; index < plannedCount; index++) {
                     const member = selectedMembers[index % selectedMembers.length];
-                    let replyText = pickReplyTextForSpeaker(payload, member.name);
+                    let replyText = pickScopedReplyText(payload, member.name);
                     if (!replyText) continue;
                     if (emojiPool.length > 0 && Math.random() < 0.18) {
                         const emoji = pickRandomFromArray(emojiPool);
@@ -700,7 +707,7 @@ autoSendInterval: 5,
             const roleMember = session.systemRoleId ? getGroupMemberByRoleId(session.systemRoleId) : null;
             const senderName = (roleMember && roleMember.name) || payload.settings.partnerName || session.name || '对方';
             for (let index = 0; index < plannedCount; index++) {
-                let replyText = pickReplyTextForSpeaker(payload, senderName);
+                let replyText = pickScopedReplyText(payload, senderName);
                 if (!replyText) continue;
                 if (emojiPool.length > 0 && Math.random() < 0.18) {
                     const emoji = pickRandomFromArray(emojiPool);
@@ -720,9 +727,14 @@ autoSendInterval: 5,
 
         async function deliverOffscreenReplies(sessionId, options) {
             const session = getSessionById(sessionId);
-            if (!session || !session.systemChatKey || session.id === SESSION_ID) return 0;
+            if (!session || !session.systemChatKey) return 0;
+            options = options || {};
             const config = getSystemSessionDeliveryConfig(session);
-            if (!backgroundSchedulerState.schedulerEnabled || !config.enabled || !config.allowOffscreenDelivery) return 0;
+            const deliveryMode = options.deliveryMode === 'catchup' ? 'catchup' : 'offscreen';
+            const isCurrentSession = session.id === SESSION_ID;
+            if (!backgroundSchedulerState.schedulerEnabled || !config.enabled) return 0;
+            if (deliveryMode === 'offscreen' && (!config.allowOffscreenDelivery || isCurrentSession)) return 0;
+            if (deliveryMode === 'catchup' && !config.restoreOnReturn) return 0;
 
             const payload = await readSessionDeliveryPayload(session);
             if (!payload) return 0;
@@ -733,12 +745,23 @@ autoSendInterval: 5,
             if (!generated.length) return 0;
 
             const nextMessages = payload.messages.concat(generated);
-            await localforage.setItem(`${APP_PREFIX}${session.id}_chatMessages`, nextMessages);
-            await syncSessionSummary(session.id, {
-                messages: nextMessages,
-                incrementUnread: generated.length,
-                persist: false
-            });
+            if (isCurrentSession && deliveryMode === 'catchup') {
+                generated.forEach(function(message) {
+                    addMessage(message);
+                });
+                await syncSessionSummary(session.id, {
+                    messages: messages,
+                    markRead: true,
+                    persist: false
+                });
+            } else {
+                await localforage.setItem(`${APP_PREFIX}${session.id}_chatMessages`, nextMessages);
+                await syncSessionSummary(session.id, {
+                    messages: nextMessages,
+                    incrementUnread: Math.max(0, Number(options.markUnread) || generated.length),
+                    persist: false
+                });
+            }
 
             const key = getBackgroundDeliveryConfigKey(session);
             const nextConfig = normalizeDeliveryConfig(session, backgroundDeliveryState[key]);
@@ -752,10 +775,10 @@ autoSendInterval: 5,
                 persistBackgroundDeliveryState()
             ]);
 
-            if (!config.muteSoundWhenInactive && typeof playSound === 'function') {
+            if (!isCurrentSession && !config.muteSoundWhenInactive && typeof playSound === 'function') {
                 playSound('message');
             }
-            if (typeof window._sendPartnerNotification === 'function') {
+            if (!isCurrentSession && typeof window._sendPartnerNotification === 'function') {
                 const lastMessage = generated[generated.length - 1];
                 window._sendPartnerNotification(lastMessage.sender || session.name || '传讯', lastMessage.image ? '[图片]' : (lastMessage.text || '发来了消息'));
             }
@@ -813,7 +836,11 @@ autoSendInterval: 5,
                     const config = getSystemSessionDeliveryConfig(session);
                     if (!config.enabled || !config.allowOffscreenDelivery) continue;
                     if (!config.nextDueAt || now < Number(config.nextDueAt)) continue;
-                    await deliverOffscreenReplies(session.id, { eventTimestamp: Number(config.nextDueAt) || now });
+                    await deliverOffscreenReplies(session.id, {
+                        eventTimestamp: Number(config.nextDueAt) || now,
+                        deliveryMode: 'offscreen',
+                        markUnread: true
+                    });
                 }
             } catch (error) {
                 console.warn('[background-delivery] tick 失败:', error);
@@ -832,10 +859,10 @@ autoSendInterval: 5,
             try {
                 for (const entry of systemSessions) {
                     const session = entry && entry.session;
-                    if (!session || session.id === SESSION_ID) continue;
+                    if (!session) continue;
                     const key = getBackgroundDeliveryConfigKey(session);
                     const config = getSystemSessionDeliveryConfig(session);
-                    if (!config.enabled || !config.allowOffscreenDelivery) continue;
+                    if (!config.enabled || !config.restoreOnReturn) continue;
 
                     let cursor = Number(config.nextDueAt || 0);
                     if (!cursor) {
@@ -851,7 +878,11 @@ autoSendInterval: 5,
                     let deliveredCount = 0;
                     while (cursor <= now && deliveredCount < backgroundSchedulerState.maxCatchupMessagesPerSession) {
                         const before = deliveredCount;
-                        deliveredCount += await deliverOffscreenReplies(session.id, { eventTimestamp: cursor });
+                        deliveredCount += await deliverOffscreenReplies(session.id, {
+                            eventTimestamp: cursor,
+                            deliveryMode: 'catchup',
+                            markUnread: session.id === SESSION_ID ? 0 : true
+                        });
                         const latestConfig = getSystemSessionDeliveryConfig(session);
                         cursor = Number(latestConfig.nextDueAt || scheduleNextDeliveryAt(latestConfig, cursor));
                         if (deliveredCount === before) break;
@@ -1274,6 +1305,40 @@ autoSendInterval: 5,
             text.textContent = enabled ? '后台来消息：开' : '后台来消息：关';
         }
 
+        function updateSessionHomeUI() {
+            document.body.classList.toggle('session-home-active', !!isSessionHomeVisible);
+            if (DOMElements.headerHomeTitle) {
+                DOMElements.headerHomeTitle.style.display = isSessionHomeVisible ? 'block' : 'none';
+            }
+            const homeBtn = DOMElements.sessionModal && DOMElements.sessionModal.managerBtn;
+            if (DOMElements.currentChatSettingsBtn) {
+                DOMElements.currentChatSettingsBtn.style.visibility = isSessionHomeVisible ? 'hidden' : 'visible';
+                DOMElements.currentChatSettingsBtn.style.pointerEvents = isSessionHomeVisible ? 'none' : 'auto';
+                DOMElements.currentChatSettingsBtn.classList.toggle('active', !isSessionHomeVisible);
+                DOMElements.currentChatSettingsBtn.classList.toggle('is-disabled', isSessionHomeVisible);
+            }
+            if (homeBtn) {
+                homeBtn.classList.toggle('active', !!isSessionHomeVisible);
+            }
+        }
+
+        window.showSessionHome = function() {
+            isSessionHomeVisible = true;
+            hideTypingIndicator();
+            updateSessionHomeUI();
+            if (typeof renderSessionList === 'function') renderSessionList();
+        };
+
+        window.hideSessionHome = function() {
+            isSessionHomeVisible = false;
+            updateSessionHomeUI();
+            requestAnimationFrame(function() {
+                if (DOMElements.chatContainer) {
+                    DOMElements.chatContainer.scrollTop = DOMElements.chatContainer.scrollHeight;
+                }
+            });
+        };
+
         function renderDeliverySettingsModal(sessionId) {
             const modalContent = DOMElements.deliverySettingsModal && DOMElements.deliverySettingsModal.content;
             if (!modalContent) return;
@@ -1284,84 +1349,77 @@ autoSendInterval: 5,
             modalContent.innerHTML = `
                 <div class="delivery-settings-header">
                     <div class="delivery-settings-copy">
-                        <strong>${session.name} · 后台消息</strong>
-                        <span>${isGroup ? '群聊会按参与人数配置生成多人消息。' : '单聊会按这个角色的独立节奏来消息。'}</span>
+                        <strong>${session.name} · 聊天设置</strong>
+                        <span>${isGroup ? '群聊的恢复与主动消息都在这里统一调整，频率都按秒填写。' : '这个聊天的恢复与主动消息都在这里统一调整，频率都按秒填写。'}</span>
                     </div>
                     <button class="session-delivery-toggle ${config.enabled ? '' : 'disabled'}" id="delivery-enabled-toggle" type="button">${config.enabled ? '已开启' : '已关闭'}</button>
                 </div>
                 <div class="delivery-card">
-                    <div class="delivery-card-title">活跃档位</div>
-                    <div class="delivery-profile-grid">
-                        <button class="delivery-profile-btn ${config.profile === 'quiet' ? 'active' : ''}" data-profile="quiet" type="button">安静</button>
-                        <button class="delivery-profile-btn ${config.profile === 'balanced' ? 'active' : ''}" data-profile="balanced" type="button">均衡</button>
-                        <button class="delivery-profile-btn ${config.profile === 'lively' ? 'active' : ''}" data-profile="lively" type="button">热闹</button>
+                    <div class="delivery-card-title">恢复</div>
+                    <div class="delivery-switch-row" id="delivery-restore-toggle">
+                        <div class="delivery-switch-copy">
+                            <strong>回到这个聊天时补发未读</strong>
+                            <span>页面切后台或重新打开后，按离开时长补一段合理数量的消息。</span>
+                        </div>
+                        <div class="setting-pill-switch ${config.restoreOnReturn ? 'active' : ''}"><div class="setting-pill-knob"></div></div>
+                    </div>
+                    <div class="delivery-switch-row" id="delivery-sound-toggle">
+                        <div class="delivery-switch-copy">
+                            <strong>后台消息静音</strong>
+                            <span>关闭后，非当前聊天来消息时也会提示音。</span>
+                        </div>
+                        <div class="setting-pill-switch ${config.muteSoundWhenInactive ? 'active' : ''}"><div class="setting-pill-knob"></div></div>
                     </div>
                 </div>
                 <div class="delivery-card">
-                    <div class="delivery-card-title">发送间隔</div>
-                    <div class="delivery-range-row">
-                        <div class="delivery-range-head">
-                            <span>最短等待</span>
-                            <span class="delivery-range-values" id="delivery-interval-min-value">${formatMinutesLabel(config.intervalMinMinutes)}</span>
+                    <div class="delivery-card-title">主动发消息</div>
+                    <div class="delivery-switch-row" id="delivery-offscreen-toggle">
+                        <div class="delivery-switch-copy">
+                            <strong>允许这个聊天主动来消息</strong>
+                            <span>关闭后，这个聊天不会在你看别的会话时主动生成新消息。</span>
                         </div>
-                        <input type="range" min="1" max="240" step="1" value="${config.intervalMinMinutes}" id="delivery-interval-min-slider" class="font-size-slider">
+                        <div class="setting-pill-switch ${config.allowOffscreenDelivery ? 'active' : ''}"><div class="setting-pill-knob"></div></div>
                     </div>
-                    <div class="delivery-range-row">
-                        <div class="delivery-range-head">
-                            <span>最长等待</span>
-                            <span class="delivery-range-values" id="delivery-interval-max-value">${formatMinutesLabel(config.intervalMaxMinutes)}</span>
-                        </div>
-                        <input type="range" min="${config.intervalMinMinutes}" max="360" step="1" value="${config.intervalMaxMinutes}" id="delivery-interval-max-slider" class="font-size-slider">
+                    <div class="delivery-form-grid">
+                        <label class="delivery-input-field">
+                            <span>最短间隔</span>
+                            <input type="number" min="1" step="1" value="${config.intervalMinSeconds}" id="delivery-interval-min-input">
+                            <em>秒</em>
+                        </label>
+                        <label class="delivery-input-field">
+                            <span>最长间隔</span>
+                            <input type="number" min="${config.intervalMinSeconds}" step="1" value="${config.intervalMaxSeconds}" id="delivery-interval-max-input">
+                            <em>秒</em>
+                        </label>
+                        <label class="delivery-input-field">
+                            <span>每次最少条数</span>
+                            <input type="number" min="1" max="5" step="1" value="${config.batchMin}" id="delivery-batch-min-input">
+                            <em>条</em>
+                        </label>
+                        <label class="delivery-input-field">
+                            <span>每次最多条数</span>
+                            <input type="number" min="${config.batchMin}" max="6" step="1" value="${config.batchMax}" id="delivery-batch-max-input">
+                            <em>条</em>
+                        </label>
+                        ${isGroup ? `
+                        <label class="delivery-input-field">
+                            <span>最少参与人数</span>
+                            <input type="number" min="1" max="5" step="1" value="${config.groupSpeakerMin}" id="delivery-speaker-min-input">
+                            <em>人</em>
+                        </label>
+                        <label class="delivery-input-field">
+                            <span>最多参与人数</span>
+                            <input type="number" min="${config.groupSpeakerMin}" max="5" step="1" value="${config.groupSpeakerMax}" id="delivery-speaker-max-input">
+                            <em>人</em>
+                        </label>` : ''}
                     </div>
                 </div>
-                <div class="delivery-card">
-                    <div class="delivery-card-title">每次消息数</div>
-                    <div class="delivery-dual-range">
-                        <div class="delivery-range-row">
-                            <div class="delivery-range-head">
-                                <span>最少</span>
-                                <span class="delivery-range-values" id="delivery-batch-min-value">${config.batchMin} 条</span>
-                            </div>
-                            <input type="range" min="1" max="5" step="1" value="${config.batchMin}" id="delivery-batch-min-slider" class="font-size-slider">
-                        </div>
-                        <div class="delivery-range-row">
-                            <div class="delivery-range-head">
-                                <span>最多</span>
-                                <span class="delivery-range-values" id="delivery-batch-max-value">${config.batchMax} 条</span>
-                            </div>
-                            <input type="range" min="${config.batchMin}" max="6" step="1" value="${config.batchMax}" id="delivery-batch-max-slider" class="font-size-slider">
-                        </div>
+                <div class="delivery-settings-footer">
+                    <button class="modal-btn modal-btn-secondary" id="delivery-back-home" type="button"><i class="fas fa-house"></i> 回到首页</button>
+                    <div class="modal-buttons" style="margin:0;">
+                        <button class="modal-btn modal-btn-secondary" id="delivery-open-group-settings" ${isGroup ? '' : 'style="display:none;"'}>群聊设置</button>
+                        <button class="modal-btn modal-btn-secondary" id="cancel-delivery-settings">关闭</button>
                     </div>
-                </div>
-                ${isGroup ? `
-                <div class="delivery-card">
-                    <div class="delivery-card-title">群聊参与人数</div>
-                    <div class="delivery-dual-range">
-                        <div class="delivery-range-row">
-                            <div class="delivery-range-head">
-                                <span>最少</span>
-                                <span class="delivery-range-values" id="delivery-speaker-min-value">${config.groupSpeakerMin} 人</span>
-                            </div>
-                            <input type="range" min="1" max="5" step="1" value="${config.groupSpeakerMin}" id="delivery-speaker-min-slider" class="font-size-slider">
-                        </div>
-                        <div class="delivery-range-row">
-                            <div class="delivery-range-head">
-                                <span>最多</span>
-                                <span class="delivery-range-values" id="delivery-speaker-max-value">${config.groupSpeakerMax} 人</span>
-                            </div>
-                            <input type="range" min="${config.groupSpeakerMin}" max="5" step="1" value="${config.groupSpeakerMax}" id="delivery-speaker-max-slider" class="font-size-slider">
-                        </div>
-                    </div>
-                </div>` : ''}
-                <div class="delivery-switch-row" id="delivery-sound-toggle">
-                    <div class="delivery-switch-copy">
-                        <strong>后台消息静音</strong>
-                        <span>关闭后，非当前聊天来消息时也会提示音。</span>
-                    </div>
-                    <div class="setting-pill-switch ${config.muteSoundWhenInactive ? 'active' : ''}"><div class="setting-pill-knob"></div></div>
-                </div>
-                <div class="modal-buttons">
-                    <button class="modal-btn modal-btn-secondary" id="cancel-delivery-settings">关闭</button>
                 </div>
             `;
 
@@ -1369,7 +1427,7 @@ autoSendInterval: 5,
             const applyConfigPatch = async function(patch) {
                 const currentConfig = getSystemSessionDeliveryConfig(session);
                 const nextConfig = normalizeDeliveryConfig(session, Object.assign({}, currentConfig, patch || {}));
-                if (!nextConfig.nextDueAt || patch.intervalMinMinutes || patch.intervalMaxMinutes || patch.enabled !== undefined || patch.profile) {
+                if (!nextConfig.nextDueAt || patch.intervalMinSeconds || patch.intervalMaxSeconds || patch.enabled !== undefined || patch.allowOffscreenDelivery !== undefined) {
                     const base = nextConfig.lastGeneratedAt || Date.now();
                     nextConfig.nextDueAt = scheduleNextDeliveryAt(nextConfig, base);
                 }
@@ -1388,62 +1446,74 @@ autoSendInterval: 5,
                 });
             }
 
-            modalContent.querySelectorAll('[data-profile]').forEach(function(button) {
-                button.addEventListener('click', function() {
-                    const profile = button.dataset.profile;
-                    applyConfigPatch(getDeliveryProfileDefaults(profile, session));
-                });
-            });
-
-            const bindDualRange = function(minId, maxId, minLabelId, maxLabelId, formatter) {
-                const minSlider = document.getElementById(minId);
-                const maxSlider = document.getElementById(maxId);
-                const minLabel = document.getElementById(minLabelId);
-                const maxLabel = document.getElementById(maxLabelId);
-                if (!minSlider || !maxSlider || !minLabel || !maxLabel) return;
-
-                const syncLabels = function() {
-                    if (Number(minSlider.value) > Number(maxSlider.value)) {
-                        maxSlider.value = minSlider.value;
-                    }
-                    maxSlider.min = minSlider.value;
-                    minLabel.textContent = formatter(Number(minSlider.value));
-                    maxLabel.textContent = formatter(Number(maxSlider.value));
-                };
-
-                syncLabels();
-                minSlider.addEventListener('input', syncLabels);
-                maxSlider.addEventListener('input', syncLabels);
-                minSlider.addEventListener('change', function() {
-                    const patch = {};
-                    patch[minId.includes('interval') ? 'intervalMinMinutes' : (minId.includes('speaker') ? 'groupSpeakerMin' : 'batchMin')] = Number(minSlider.value);
-                    patch[maxId.includes('interval') ? 'intervalMaxMinutes' : (maxId.includes('speaker') ? 'groupSpeakerMax' : 'batchMax')] = Number(maxSlider.value);
-                    applyConfigPatch(patch);
-                });
-                maxSlider.addEventListener('change', function() {
-                    const patch = {};
-                    patch[minId.includes('interval') ? 'intervalMinMinutes' : (minId.includes('speaker') ? 'groupSpeakerMin' : 'batchMin')] = Number(minSlider.value);
-                    patch[maxId.includes('interval') ? 'intervalMaxMinutes' : (maxId.includes('speaker') ? 'groupSpeakerMax' : 'batchMax')] = Number(maxSlider.value);
-                    applyConfigPatch(patch);
-                });
-            };
-
-            bindDualRange('delivery-interval-min-slider', 'delivery-interval-max-slider', 'delivery-interval-min-value', 'delivery-interval-max-value', formatMinutesLabel);
-            bindDualRange('delivery-batch-min-slider', 'delivery-batch-max-slider', 'delivery-batch-min-value', 'delivery-batch-max-value', function(value) {
-                return `${value} 条`;
-            });
-            if (isGroup) {
-                bindDualRange('delivery-speaker-min-slider', 'delivery-speaker-max-slider', 'delivery-speaker-min-value', 'delivery-speaker-max-value', function(value) {
-                    return `${value} 人`;
-                });
-            }
-
             const soundToggle = document.getElementById('delivery-sound-toggle');
             if (soundToggle) {
                 soundToggle.addEventListener('click', function() {
                     applyConfigPatch({ muteSoundWhenInactive: !getSystemSessionDeliveryConfig(session).muteSoundWhenInactive });
                 });
             }
+            const restoreToggle = document.getElementById('delivery-restore-toggle');
+            if (restoreToggle) {
+                restoreToggle.addEventListener('click', function() {
+                    applyConfigPatch({ restoreOnReturn: !getSystemSessionDeliveryConfig(session).restoreOnReturn });
+                });
+            }
+            const offscreenToggle = document.getElementById('delivery-offscreen-toggle');
+            if (offscreenToggle) {
+                offscreenToggle.addEventListener('click', function() {
+                    applyConfigPatch({ allowOffscreenDelivery: !getSystemSessionDeliveryConfig(session).allowOffscreenDelivery });
+                });
+            }
+
+            const bindNumberInputs = function() {
+                const minIntervalInput = document.getElementById('delivery-interval-min-input');
+                const maxIntervalInput = document.getElementById('delivery-interval-max-input');
+                const batchMinInput = document.getElementById('delivery-batch-min-input');
+                const batchMaxInput = document.getElementById('delivery-batch-max-input');
+                const speakerMinInput = document.getElementById('delivery-speaker-min-input');
+                const speakerMaxInput = document.getElementById('delivery-speaker-max-input');
+                const inputs = [minIntervalInput, maxIntervalInput, batchMinInput, batchMaxInput, speakerMinInput, speakerMaxInput].filter(Boolean);
+                if (!inputs.length) return;
+
+                const commit = function() {
+                    const patch = {
+                        intervalMinSeconds: Number(minIntervalInput.value),
+                        intervalMaxSeconds: Number(maxIntervalInput.value),
+                        batchMin: Number(batchMinInput.value),
+                        batchMax: Number(batchMaxInput.value)
+                    };
+                    if (speakerMinInput && speakerMaxInput) {
+                        patch.groupSpeakerMin = Number(speakerMinInput.value);
+                        patch.groupSpeakerMax = Number(speakerMaxInput.value);
+                    }
+                    applyConfigPatch(patch);
+                };
+
+                const normalizeInputs = function() {
+                    if (Number(minIntervalInput.value) > Number(maxIntervalInput.value)) {
+                        maxIntervalInput.value = minIntervalInput.value;
+                    }
+                    maxIntervalInput.min = minIntervalInput.value || '1';
+                    if (Number(batchMinInput.value) > Number(batchMaxInput.value)) {
+                        batchMaxInput.value = batchMinInput.value;
+                    }
+                    batchMaxInput.min = batchMinInput.value || '1';
+                    if (speakerMinInput && speakerMaxInput) {
+                        if (Number(speakerMinInput.value) > Number(speakerMaxInput.value)) {
+                            speakerMaxInput.value = speakerMinInput.value;
+                        }
+                        speakerMaxInput.min = speakerMinInput.value || '1';
+                    }
+                };
+
+                inputs.forEach(function(input) {
+                    input.addEventListener('input', normalizeInputs);
+                    input.addEventListener('change', commit);
+                    input.addEventListener('blur', commit);
+                });
+                normalizeInputs();
+            };
+            bindNumberInputs();
 
             const closeBtn = document.getElementById('cancel-delivery-settings');
             if (closeBtn) {
@@ -1451,9 +1521,28 @@ autoSendInterval: 5,
                     hideModal(DOMElements.deliverySettingsModal.modal);
                 });
             }
+            const backHomeBtn = document.getElementById('delivery-back-home');
+            if (backHomeBtn) {
+                backHomeBtn.addEventListener('click', function() {
+                    hideModal(DOMElements.deliverySettingsModal.modal);
+                    if (typeof window.showSessionHome === 'function') window.showSessionHome();
+                });
+            }
+            const openGroupBtn = document.getElementById('delivery-open-group-settings');
+            if (openGroupBtn) {
+                openGroupBtn.addEventListener('click', function() {
+                    hideModal(DOMElements.deliverySettingsModal.modal);
+                    showModal(document.getElementById('group-chat-modal'));
+                });
+            }
         }
 
         window.openSessionDeliverySettings = function(sessionId) {
+            const session = getSessionById(sessionId);
+            if (!session || !session.systemChatKey) {
+                showNotification('当前是自定义会话，暂无独立恢复/主动消息设置', 'info', 2200);
+                return;
+            }
             renderDeliverySettingsModal(sessionId);
             if (DOMElements.deliverySettingsModal && DOMElements.deliverySettingsModal.modal) {
                 showModal(DOMElements.deliverySettingsModal.modal);
@@ -1669,6 +1758,15 @@ autoSendInterval: 5,
         if (savedPartnerPersonas) partnerPersonas = savedPartnerPersonas;
 
         if (savedSettings) Object.assign(settings, savedSettings);
+        if (!savedSettings || savedSettings.autoSendIntervalSeconds === undefined) {
+            const legacyMinutes = Number(settings.autoSendInterval || 0);
+            if (legacyMinutes > 0) {
+                settings.autoSendIntervalSeconds = legacyMinutes * 60;
+            }
+        }
+        if (!settings.autoSendIntervalSeconds || Number(settings.autoSendIntervalSeconds) < 1) {
+            settings.autoSendIntervalSeconds = 300;
+        }
 
         if (settings.showPartnerNameInChat !== undefined) {
             showPartnerNameInChat = settings.showPartnerNameInChat;
@@ -2138,7 +2236,7 @@ function manageAutoSendTimer() {
         autoSendTimer = null;
     }
     if (settings.autoSendEnabled) {
-        const intervalMs = settings.autoSendInterval * 60 * 1000;
+        const intervalMs = Math.max(1, Number(settings.autoSendIntervalSeconds || 300) || 300) * 1000;
         
         autoSendTimer = setInterval(() => {
             if (!document.body.classList.contains('batch-favorite-mode')) {
@@ -2170,7 +2268,6 @@ function manageAutoSendTimer() {
             }
 
             DOMElements.html.setAttribute('data-theme', settings.isDarkMode ? 'dark': 'light');
-            DOMElements.themeToggle.innerHTML = settings.isDarkMode ? '<i class="fas fa-sun"></i>': '<i class="fas fa-moon"></i>';
             DOMElements.partner.name.textContent = settings.partnerName;
             DOMElements.me.name.textContent = settings.myName;
             DOMElements.partner.status.textContent = settings.partnerStatus || '在线';
@@ -2227,12 +2324,13 @@ function manageAutoSendTimer() {
             const unreadCount = getUnreadSessionCount();
             if (unreadBadge) {
                 unreadBadge.hidden = unreadCount <= 0;
-                unreadBadge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
+                unreadBadge.textContent = unreadCount > 0 ? (unreadCount > 99 ? '99+' : String(unreadCount)) : '';
             }
 
             renderBackgroundDeliveryOverview();
             if (typeof renderChatModeList === 'function') renderChatModeList();
             if (typeof renderSessionList === 'function') renderSessionList();
+            updateSessionHomeUI();
             renderMessages();
         };
 
@@ -2992,25 +3090,17 @@ if (!isGroupReplyMode && !activeRoleMember && partnerPersonas && partnerPersonas
             let replyCount = isGroupReplyMode
                 ? Math.min(groupChatSettings.members.length, 3 + Math.floor(Math.random() * 3))
                 : 1;
-            if (!customReplies || customReplies.length === 0) {
+            const currentReplyPayload = buildCurrentSessionReplyPayload();
+            if (!currentReplyPayload.customReplies || currentReplyPayload.customReplies.length === 0) {
                 showNotification('回复库为空，请先到「自定义回复」中添加内容', 'info', 3500);
                 return;
             }
-            const disabledItemsOnce = (() => {
-                try {
-                    const raw = localStorage.getItem('disabledReplyItems');
-                    return raw ? new Set(JSON.parse(raw)) : new Set();
-                } catch (e) { return new Set(); }
-            })();
-            const disabledGroupItemsOnce = new Set();
-            (window.customReplyGroups || []).forEach(g => {
-                if (g.disabled && Array.isArray(g.items)) g.items.forEach(item => disabledGroupItemsOnce.add(item));
-            });
-            const replyPoolOnce = customReplies
-                .filter(r => !disabledItemsOnce.has(r) && !disabledGroupItemsOnce.has(r))
-                .map(r => String(r || '').trim())
-                .filter(Boolean);
-            if (!replyPoolOnce.length) {
+            const hasAnyScopedReply = isGroupReplyMode
+                ? groupChatSettings.members.some(function(member) {
+                    return member && member.name && !!pickScopedReplyText(currentReplyPayload, member.name);
+                })
+                : !!pickScopedReplyText(currentReplyPayload, (activeRoleMember && activeRoleMember.name) || settings.partnerName || '对方');
+            if (!hasAnyScopedReply) {
                 showNotification('回复库可用内容为空（可能被分组禁用或屏蔽），请到「自定义回复」中调整', 'info', 4000);
                 return;
             }
@@ -3050,7 +3140,6 @@ if (!isGroupReplyMode && !activeRoleMember && partnerPersonas && partnerPersonas
                 setTimeout(() => {
                     try {
                     const plannedGroupReply = groupReplyPlan[i];
-                    const replyPool = replyPoolOnce;
                     let replyText = '';
                     let senderName = settings.partnerName || '对方';
                     const currentMember = plannedGroupReply?.member || activeRoleMember || null;
@@ -3058,14 +3147,8 @@ if (!isGroupReplyMode && !activeRoleMember && partnerPersonas && partnerPersonas
                         replyText = String(plannedGroupReply.text).trim();
                         senderName = currentMember?.name || senderName;
                     } else {
-                        // 被屏蔽或无效项直接换下一个，尽量保证每次都产出可用回复
-                        for (let t = 0; t < 6; t++) {
-                            const picked = replyPool[Math.floor(Math.random() * replyPool.length)];
-                            if (picked && String(picked).trim()) {
-                                replyText = String(picked).trim();
-                                break;
-                            }
-                        }
+                        senderName = currentMember?.name || senderName;
+                        replyText = pickScopedReplyText(currentReplyPayload, senderName);
                     }
                     if (!replyText && i === replyCount - 1) {
                         hideTypingIndicator();

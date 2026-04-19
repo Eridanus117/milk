@@ -111,18 +111,19 @@ const { chromium } = require('playwright');
   const dailyVisible = await page.locator('#daily-greeting-modal:not(.hidden)').isVisible().catch(() => false);
   push(
     'daily greeting flow handled',
-    dailyVisible || await page.locator('#session-manager-btn').isVisible().catch(() => false),
+    dailyVisible || await page.locator('#session-home-screen').isVisible().catch(() => false),
     dailyVisible ? 'modal shown' : 'skipped'
   );
   if (dailyVisible) {
-    await page.click('.daily-greeting-close-btn');
-    await page.waitForTimeout(700);
+    await page.locator('.daily-greeting-close-btn').click({ force: true });
+    await page.waitForTimeout(900);
+    await page.locator('#daily-greeting-modal').evaluate((el) => {
+      el.classList.add('hidden');
+      el.style.display = 'none';
+    }).catch(() => {});
   }
 
-  push('chat list button visible', await page.locator('#session-manager-btn').isVisible(), '');
-
-  await page.click('#session-manager-btn');
-  await page.waitForTimeout(300);
+  push('session home visible by default', await page.locator('#session-home-screen').isVisible(), '');
   const systemChatCount = await page.evaluate(async () => {
     const sessions = await localforage.getItem('CHAT_APP_V3_sessionList');
     return Array.isArray(sessions) ? sessions.filter(session => session.systemChatKey).length : 0;
@@ -130,10 +131,11 @@ const { chromium } = require('playwright');
   push('system chat entry count', systemChatCount === 6, String(systemChatCount));
 
   const partnerBefore = await page.locator('#partner-name').innerText();
-  await page.locator('#session-list .session-section').first().locator('.session-item[data-id]').nth(1).click();
+  await page.locator('#session-home-list .session-section').first().locator('.session-item[data-id]').nth(1).click();
   await page.waitForTimeout(1600);
   const partnerAfter = await page.locator('#partner-name').innerText();
   push('switch to dm changes header name', partnerBefore !== partnerAfter, `${partnerBefore} -> ${partnerAfter}`);
+  push('home button visible in chat view', await page.locator('#session-manager-btn').isVisible(), '');
 
   const storage = await page.evaluate(async () => ({
     mode: await localforage.getItem('CHAT_APP_V3_chatModeState'),

@@ -399,9 +399,9 @@ const tourSteps = [
         onBefore: () => { if (isTourActive) showModal(DOMElements.settingsModal.modal); }
     },
     {
-        element: '#chat-settings',
-        title: "💬 聊天设置",
-        content: "<b>聊天设置</b>里可以调整：<br>• 消息音效开关<br>• 已读回执显示<br>• 对方回复速度（快/慢）<br>• 消息气泡样式（圆角/方形）",
+        element: '#session-home-screen',
+        title: "💬 聊天首页",
+        content: "现在默认先进入<b>会话列表首页</b>，像聊天软件一样先选会话再进入对话。<br>",
         position: 'bottom'
     },
     {
@@ -417,9 +417,9 @@ const tourSteps = [
         position: 'top'
     },
     {
-        element: '#theme-toggle',
-        title: "🌙 日 / 夜模式切换",
-        content: "这个按钮可以快速<b>切换白天 / 夜晚</b>模式。<br><br>夜晚模式下整体变成深色背景，对眼睛更友好，睡前聊天必备！✨",
+        element: '#settings-btn',
+        title: "🧰 功能列表",
+        content: "这个按钮会打开<b>功能列表</b>，里面收纳外观、公告、工具和数据管理。<br>",
         position: 'bottom',
         onBefore: () => { if (isTourActive) hideModal(DOMElements.settingsModal.modal); }
     },
@@ -431,8 +431,8 @@ const tourSteps = [
     },
     {
         element: '#session-manager-btn',
-        title: "💬 聊天列表",
-        content: "这里会像聊天软件一样展示<b>群聊 + 五个角色单聊</b>，也能看到最近消息和未读红点。<br>",
+        title: "🏠 首页",
+        content: "中间这个按钮会把你带回<b>首页会话列表</b>，像微信一样从会话入口重新选择聊天。<br>",
         position: 'bottom'
     },
     {

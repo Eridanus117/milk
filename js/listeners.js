@@ -401,38 +401,17 @@ fileInput.addEventListener('change', function(e) {
                 statusContainer.innerHTML = ''; statusContainer.appendChild(input); input.focus();
             });
 
-            DOMElements.themeToggle.addEventListener('click', () => {
-                settings.isDarkMode = !settings.isDarkMode; throttledSaveData(); updateUI(); showNotification(`已切换到${settings.isDarkMode ? '夜': '昼'}模式`,
-                    'success');
-            });
-            if (DOMElements.chatModeModal && DOMElements.chatModeModal.openBtn) {
-                DOMElements.chatModeModal.openBtn.addEventListener('click', () => {
-                    if (typeof renderChatModeList === 'function') renderChatModeList();
-                    showModal(DOMElements.chatModeModal.modal);
-                });
-            }
-            if (DOMElements.chatModeModal && DOMElements.chatModeModal.closeBtn) {
-                DOMElements.chatModeModal.closeBtn.addEventListener('click', () => {
-                    hideModal(DOMElements.chatModeModal.modal);
-                });
-            }
-            if (DOMElements.chatModeModal && DOMElements.chatModeModal.list) {
-                DOMElements.chatModeModal.list.addEventListener('click', async (e) => {
-                    const target = e.target.closest('[data-session-id]');
-                    if (!target) return;
-                    const sessionId = target.dataset.sessionId;
-                    if (!sessionId || sessionId === SESSION_ID) {
-                        hideModal(DOMElements.chatModeModal.modal);
-                        return;
-                    }
-                    const ok = await window.switchToSession(sessionId);
-                    if (ok) hideModal(DOMElements.chatModeModal.modal);
-                });
-            }
             DOMElements.settingsModal.settingsBtn.addEventListener('click', () => {
                 if (typeof renderBuildInfoPanel === 'function') renderBuildInfoPanel();
                 showModal(DOMElements.settingsModal.modal);
             });
+            if (DOMElements.currentChatSettingsBtn) {
+                DOMElements.currentChatSettingsBtn.addEventListener('click', () => {
+                    if (typeof window.openSessionDeliverySettings === 'function') {
+                        window.openSessionDeliverySettings(SESSION_ID);
+                    }
+                });
+            }
             if (DOMElements.favoritesModal && DOMElements.favoritesModal.favoritesBtn) {
                 DOMElements.favoritesModal.favoritesBtn.addEventListener('click', () => {
                 showModal(document.getElementById('group-chat-modal'));
@@ -531,6 +510,11 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
     showModal(DOMElements.chatModal.modal);
     setupAvatarFrameSettings();
 });
+            const _dailyGreetingEl = document.getElementById('reopen-daily-greeting');
+            if (_dailyGreetingEl) _dailyGreetingEl.addEventListener('click', () => {
+                hideModal(DOMElements.settingsModal.modal);
+                if (typeof reopenDailyGreeting === 'function') reopenDailyGreeting();
+            });
             const _advancedEl = document.getElementById('advanced-settings');
             if (_advancedEl) _advancedEl.addEventListener('click', () => {
                 hideModal(DOMElements.settingsModal.modal);
@@ -1042,10 +1026,8 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                 });
             });
             
-            const minDelaySlider = document.getElementById('reply-delay-min-slider');
-            const minDelayValue = document.getElementById('reply-delay-min-value');
-            const maxDelaySlider = document.getElementById('reply-delay-max-slider');
-            const maxDelayValue = document.getElementById('reply-delay-max-value');
+            const minDelayInput = document.getElementById('reply-delay-min-input');
+            const maxDelayInput = document.getElementById('reply-delay-max-input');
 
             window.switchCsTab = function switchCsTab(btn) {
                 document.querySelectorAll('.cs-tab').forEach(t => t.classList.remove('active'));
@@ -1056,33 +1038,31 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
             };
 
             function updateDelayUI() {
-                minDelaySlider.value = settings.replyDelayMin;
-                const minSec = settings.replyDelayMin / 1000;
-                minDelayValue.textContent = minSec >= 60 ? `${(minSec/60).toFixed(1)}分钟` : `${minSec.toFixed(0)}s`;
-                maxDelaySlider.value = settings.replyDelayMax;
-                const maxSec = settings.replyDelayMax / 1000;
-                maxDelayValue.textContent = maxSec >= 60 ? `${(maxSec/60).toFixed(1)}分钟` : `${maxSec.toFixed(0)}s`;
-                maxDelaySlider.min = settings.replyDelayMin; 
+                if (minDelayInput) minDelayInput.value = String(Math.max(1, Math.round((settings.replyDelayMin || 3000) / 1000)));
+                if (maxDelayInput) {
+                    maxDelayInput.value = String(Math.max(1, Math.round((settings.replyDelayMax || 7000) / 1000)));
+                    maxDelayInput.min = minDelayInput ? minDelayInput.value : '1';
+                }
             }
             updateDelayUI();
 
-            minDelaySlider.addEventListener('input', (e) => {
-                settings.replyDelayMin = parseInt(e.target.value, 10);
-                if (settings.replyDelayMin > settings.replyDelayMax) {
-                    settings.replyDelayMax = settings.replyDelayMin;
-                }
-                updateDelayUI();
-            });
-            minDelaySlider.addEventListener('change', throttledSaveData);
-
-            maxDelaySlider.addEventListener('input', (e) => {
-                settings.replyDelayMax = parseInt(e.target.value, 10);
-                 if (settings.replyDelayMax < settings.replyDelayMin) {
-                    settings.replyDelayMin = settings.replyDelayMax;
-                }
-                updateDelayUI();
-            });
-            maxDelaySlider.addEventListener('change', throttledSaveData);
+            if (minDelayInput && maxDelayInput) {
+                const syncDelayInputs = () => {
+                    const minSeconds = Math.max(1, parseInt(minDelayInput.value, 10) || 1);
+                    let maxSeconds = Math.max(1, parseInt(maxDelayInput.value, 10) || 1);
+                    if (minSeconds > maxSeconds) {
+                        maxSeconds = minSeconds;
+                        maxDelayInput.value = String(maxSeconds);
+                    }
+                    maxDelayInput.min = String(minSeconds);
+                    settings.replyDelayMin = minSeconds * 1000;
+                    settings.replyDelayMax = maxSeconds * 1000;
+                };
+                minDelayInput.addEventListener('input', syncDelayInputs);
+                maxDelayInput.addEventListener('input', syncDelayInputs);
+                minDelayInput.addEventListener('change', () => { syncDelayInputs(); throttledSaveData(); });
+                maxDelayInput.addEventListener('change', () => { syncDelayInputs(); throttledSaveData(); });
+            }
 
             const settingToggles = {
                 '#reply-toggle': {
@@ -1293,15 +1273,13 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
 
 const autoSendToggle = document.getElementById('auto-send-toggle');
 const autoSendControl = document.getElementById('auto-send-control');
-const autoSendSlider = document.getElementById('auto-send-slider');
-const autoSendValue = document.getElementById('auto-send-value');
+const autoSendSecondsInput = document.getElementById('auto-send-seconds-input');
 
 const updateAutoSendUI = () => {
     autoSendToggle.classList.toggle('active', !!settings.autoSendEnabled);
     autoSendControl.style.display = settings.autoSendEnabled ? "flex" : "none";
-    const currentVal = settings.autoSendInterval || 5;
-    autoSendSlider.value = currentVal;
-    autoSendValue.textContent = `${currentVal}分钟`;
+    const currentVal = settings.autoSendIntervalSeconds || 300;
+    if (autoSendSecondsInput) autoSendSecondsInput.value = String(currentVal);
 };
 
 updateAutoSendUI();
@@ -1314,19 +1292,16 @@ autoSendToggle.addEventListener('click', () => {
     showNotification(`主动发送已${settings.autoSendEnabled ? '开启' : '关闭'}`, 'success');
 });
 
-autoSendSlider.value = settings.autoSendInterval || 5;
-autoSendValue.textContent = `${settings.autoSendInterval || 5}分钟`;
-
-autoSendSlider.addEventListener('input', (e) => {
-    const val = parseInt(e.target.value);
-    settings.autoSendInterval = val;
-    autoSendValue.textContent = `${val}分钟`;
-});
-
-autoSendSlider.addEventListener('change', () => {
-    manageAutoSendTimer(); 
-    throttledSaveData();
-});
+if (autoSendSecondsInput) {
+    autoSendSecondsInput.value = String(settings.autoSendIntervalSeconds || 300);
+    autoSendSecondsInput.addEventListener('input', (e) => {
+        settings.autoSendIntervalSeconds = Math.max(1, parseInt(e.target.value, 10) || 1);
+    });
+    autoSendSecondsInput.addEventListener('change', () => {
+        manageAutoSendTimer();
+        throttledSaveData();
+    });
+}
 
             const resetBgBtn = document.getElementById('reset-default-bg');
             if (resetBgBtn) {
@@ -1502,8 +1477,9 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
 
         if (DOMElements.sessionModal && DOMElements.sessionModal.managerBtn) {
             DOMElements.sessionModal.managerBtn.addEventListener('click', () => {
-                renderSessionList();
-                showModal(DOMElements.sessionModal.modal);
+                if (typeof window.showSessionHome === 'function') {
+                    window.showSessionHome();
+                }
             });
         }
         if (DOMElements.sessionModal && DOMElements.sessionModal.deliveryToggleBtn) {
@@ -1526,23 +1502,20 @@ if (_cancelEnvEl) _cancelEnvEl.addEventListener('click', () => {
                 showNotification('新会话已创建', 'success');
             });
         }
+        if (DOMElements.sessionHomeCreateBtn) {
+            DOMElements.sessionHomeCreateBtn.addEventListener('click', async () => {
+                await createNewSession(false);
+                renderSessionList();
+                showNotification('新会话已创建', 'success');
+            });
+        }
 
-        if (DOMElements.sessionModal && DOMElements.sessionModal.list) {
-            DOMElements.sessionModal.list.addEventListener('click', (e) => {
+        const bindSessionListInteractions = function(container) {
+            if (!container) return;
+            container.addEventListener('click', (e) => {
             const item = e.target.closest('.session-item');
             if (!item) return;
             const sessionId = item.dataset.id;
-
-            if (e.target.closest('.group-settings')) {
-                showModal(document.getElementById('group-chat-modal'));
-                return;
-            }
-            if (e.target.closest('.delivery')) {
-                if (typeof window.openSessionDeliverySettings === 'function') {
-                    window.openSessionDeliverySettings(sessionId);
-                }
-                return;
-            }
 
             if (e.target.closest('.rename')) {
                 const session = sessionList.find(s => s.id === sessionId);
@@ -1601,12 +1574,16 @@ if (sessionId === currentSessionId) {
 
                 if (sessionId !== SESSION_ID) {
                     window.switchToSession(sessionId).then((ok) => {
-                        if (ok) hideModal(DOMElements.sessionModal.modal);
+                        if (ok && typeof window.hideSessionHome === 'function') window.hideSessionHome();
                     });
+                } else if (typeof window.hideSessionHome === 'function') {
+                    window.hideSessionHome();
                 }
             }
             });
-        }
+        };
+        bindSessionListInteractions(DOMElements.sessionModal && DOMElements.sessionModal.list);
+        bindSessionListInteractions(DOMElements.sessionHomeList);
 
         const initMusicPlayer = async () => {
     const latestSystemSongs = [{

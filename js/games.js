@@ -147,8 +147,11 @@ function renderStatsContent() {
         };
         function renderSessionList() {
             const listContainer = DOMElements.sessionModal.list;
+            const homeListContainer = DOMElements.sessionHomeList;
             if (sessionList.length === 0) {
-                listContainer.innerHTML = '<div class="stats-empty" style="padding: 20px 0;"><p>还没有会话</p></div>';
+                const emptyHtml = '<div class="stats-empty" style="padding: 20px 0;"><p>还没有会话</p></div>';
+                if (listContainer) listContainer.innerHTML = emptyHtml;
+                if (homeListContainer) homeListContainer.innerHTML = emptyHtml;
                 return;
             }
             const defaultPreview = function(session) {
@@ -189,10 +192,7 @@ function renderStatsContent() {
                     ? window.getSessionListTimeLabel(session.lastMessageAt || session.createdAt)
                     : new Date(session.createdAt).toLocaleDateString();
                 const actionHtml = isSystemChat
-                    ? ('<button class="session-action-btn delivery" title="后台消息设置"><i class="fas fa-bell"></i></button>'
-                        + (session.systemChatType === 'group'
-                            ? '<button class="session-action-btn textual group-settings" title="群聊设置">群聊</button>'
-                            : '<span class="session-meta">系统入口</span>'))
+                    ? '<span class="session-meta">系统入口</span>'
                     : '<button class="session-action-btn rename" title="重命名"><i class="fas fa-pen"></i></button>'
                         + '<button class="session-action-btn delete" title="删除"><i class="fas fa-trash"></i></button>';
                 return `
@@ -229,7 +229,7 @@ function renderStatsContent() {
                 .filter(session => session && !session.systemChatKey)
                 .sort((a, b) => (b.lastMessageAt || b.createdAt || 0) - (a.lastMessageAt || a.createdAt || 0));
 
-            listContainer.innerHTML = `
+            const finalHtml = `
                 <div class="session-section">
                     <div class="session-section-title">
                         <span>聊天入口</span>
@@ -245,6 +245,8 @@ function renderStatsContent() {
                     ${customSessions.length ? customSessions.map(renderSessionItem).join('') : '<div class="session-empty-hint">还没有自定义会话，需要时再新建。</div>'}
                 </div>
             `;
+            if (listContainer) listContainer.innerHTML = finalHtml;
+            if (homeListContainer) homeListContainer.innerHTML = finalHtml;
         }
 
 

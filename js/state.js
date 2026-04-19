@@ -7,6 +7,7 @@
         let SESSION_ID = null;
         let autoSendTimer = null; 
         let sessionList = [];
+        let isSessionHomeVisible = true;
         let chatModeState = { mode: 'group', activeRoleId: null };
         let backgroundDeliveryState = {};
         let backgroundSchedulerState = {};
@@ -54,11 +55,15 @@
         const DOMElements = {
             html: document.documentElement,
             chatContainer: document.getElementById('chat-container'),
+            sessionHomeScreen: document.getElementById('session-home-screen'),
+            sessionHomeList: document.getElementById('session-home-list'),
+            sessionHomeCreateBtn: document.getElementById('session-home-create-btn'),
+            currentChatSettingsBtn: document.getElementById('current-chat-settings-btn'),
+            headerHomeTitle: document.getElementById('header-home-title'),
             messageInput: document.getElementById('message-input'),
             sendBtn: document.getElementById('send-btn'),
             attachmentBtn: document.getElementById('attachment-btn'),
             imageInput: document.getElementById('image-input'),
-            themeToggle: document.getElementById('theme-toggle'),
             batchBtn: document.getElementById('batch-btn'),
             continueBtn: document.getElementById('continue-btn'),
             comboBtn: document.getElementById('combo-btn'),

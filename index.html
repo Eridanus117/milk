@@ -188,7 +188,7 @@
     <div class="header">
         <div class="header-motto"></div>
         <div class="header-inner">
-         <div class="user-info">
+         <div class="user-info header-chat-side">
                 <div id="partner-name" class="username">
                     梦角
                 </div>
@@ -201,16 +201,23 @@
                     <span>在线</span>
                 </div>
             </div>
+            <div class="header-home-title" id="header-home-title" style="display:none;">聊天列表</div>
             <div class="header-actions">
-                <button id="session-manager-btn" class="action-btn" title="聊天列表">
-                    <i class="fas fa-comments"></i>
+                <button id="settings-btn" class="action-btn" title="功能列表">
+                    <span class="action-btn-icon"><i class="fas fa-th-large"></i></span>
+                    <span class="action-btn-label">功能</span>
+                </button>
+                <button id="session-manager-btn" class="action-btn" title="回到首页">
+                    <span class="action-btn-icon"><i class="fas fa-house"></i></span>
+                    <span class="action-btn-label">首页</span>
                     <span class="header-action-badge" id="session-manager-badge" hidden></span>
                 </button>
-                <button id="daily-greeting-btn" class="action-btn" title="今日公告" onclick="reopenDailyGreeting()"><i class="fas fa-newspaper"></i></button>
-                <button id="theme-toggle" class="action-btn" title="切换主题"><i class="fas fa-moon"></i></button>
-                <button id="settings-btn" class="action-btn" title="设置"><i class="fas fa-cog"></i></button>
+                <button id="current-chat-settings-btn" class="action-btn" title="当前设置">
+                    <span class="action-btn-icon"><i class="fas fa-sliders-h"></i></span>
+                    <span class="action-btn-label">设置</span>
+                </button>
             </div>
-             <div class="user-info">
+             <div class="user-info header-chat-side">
                 <div class="username" id="my-name">
                     我
                 </div>
@@ -229,6 +236,18 @@
     </div>
 
     <div class="main-chat-area">
+        <div class="session-home-screen" id="session-home-screen">
+            <div class="session-home-panel">
+                <div class="session-home-copy">
+                    <strong>像聊天软件一样，从会话列表开始</strong>
+                    <span>先选一个聊天再进入对话；未读红点会直接留在这里。</span>
+                </div>
+                <div class="session-home-list" id="session-home-list"></div>
+                <div class="session-home-actions">
+                    <button class="modal-btn modal-btn-primary" id="session-home-create-btn"><i class="fas fa-plus"></i> 新建自定义会话</button>
+                </div>
+            </div>
+        </div>
 
         <div class="history-loader" id="history-loader">
             <div class="history-spinner"></div>
@@ -651,21 +670,21 @@
     <div class="modal" id="settings-modal">
         <div class="modal-content">
             <div class="modal-title">
-                <i class="fas fa-cog"></i><span>设置</span>
+                <i class="fas fa-th-large"></i><span>功能列表</span>
             </div>
 
             <div class="settings-grid">
                 <div class="settings-card" id="appearance-settings">
                     <i class="fas fa-palette"></i>
-                    <span>外观设置</span>
+                    <span>外观与主题</span>
                 </div>
-                <div class="settings-card" id="chat-settings">
-                    <i class="fas fa-comments"></i>
-                    <span>聊天设置</span>
+                <div class="settings-card" id="reopen-daily-greeting">
+                    <i class="fas fa-newspaper"></i>
+                    <span>今日公告</span>
                 </div>
                 <div class="settings-card" id="advanced-settings">
                     <i class="fas fa-tools"></i>
-                    <span>高级功能</span>
+                    <span>功能工具</span>
                 </div>
                 <div class="settings-card" id="data-settings">
                     <i class="fas fa-database"></i>
@@ -1180,15 +1199,17 @@
                 <div class="cs-panel" id="cs-panel-rhythm">
                     <p class="cs-group-label">回复速度</p>
                     <div class="cs-card" style="margin-bottom:10px;">
-                        <div class="cs-slider-row">
-                            <span class="cs-slider-label">最短等待</span>
-                            <input type="range" min="1000" max="30000" step="1000" value="3000" class="font-size-slider" id="reply-delay-min-slider">
-                            <span class="cs-slider-val" id="reply-delay-min-value">3s</span>
-                        </div>
-                        <div class="cs-slider-row">
-                            <span class="cs-slider-label">最长等待</span>
-                            <input type="range" min="1000" max="120000" step="1000" value="7000" class="font-size-slider" id="reply-delay-max-slider">
-                            <span class="cs-slider-val" id="reply-delay-max-value">7s</span>
+                        <div class="delivery-form-grid">
+                            <label class="delivery-input-field">
+                                <span>最短等待</span>
+                                <input type="number" min="1" step="1" value="3" id="reply-delay-min-input">
+                                <em>秒</em>
+                            </label>
+                            <label class="delivery-input-field">
+                                <span>最长等待</span>
+                                <input type="number" min="1" step="1" value="7" id="reply-delay-max-input">
+                                <em>秒</em>
+                            </label>
                         </div>
                     </div>
 
@@ -1200,10 +1221,12 @@
                             <div class="setting-pill-switch"><div class="setting-pill-knob"></div></div>
                         </div>
                         <div id="auto-send-control" style="display:none;">
-                            <div class="cs-slider-row">
-                                <span class="cs-slider-label">间隔</span>
-                                <input type="range" min="1" max="120" step="1" value="5" class="font-size-slider" id="auto-send-slider">
-                                <span class="cs-slider-val" id="auto-send-value">5分钟</span>
+                            <div class="delivery-form-grid" style="grid-template-columns:1fr;">
+                                <label class="delivery-input-field">
+                                    <span>间隔</span>
+                                    <input type="number" min="1" step="1" value="300" id="auto-send-seconds-input">
+                                    <em>秒</em>
+                                </label>
                             </div>
                         </div>
                     </div>
