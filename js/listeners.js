@@ -585,6 +585,24 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                     });
             });
 
+            const bindThemeModeToggle = (selector, isDarkMode) => {
+                const element = document.querySelector(selector);
+                if (!element) return;
+                const sync = () => element.classList.toggle('active', !!settings.isDarkMode === isDarkMode);
+                sync();
+                element.addEventListener('click', () => {
+                    settings.isDarkMode = isDarkMode;
+                    throttledSaveData();
+                    updateUI();
+                    sync();
+                    const other = document.querySelector(isDarkMode ? '#theme-mode-light' : '#theme-mode-dark');
+                    if (other) other.classList.toggle('active', !isDarkMode);
+                    showNotification(`已切换到${isDarkMode ? '夜用' : '日用'}模式`, 'success');
+                });
+            };
+            bindThemeModeToggle('#theme-mode-light', false);
+            bindThemeModeToggle('#theme-mode-dark', true);
+
 
             document.querySelectorAll('[data-bubble-style]').forEach(item => {
                 item.addEventListener('click',
@@ -1229,6 +1247,10 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                 document.querySelectorAll('.theme-color-btn').forEach(btn => {
                     btn.classList.toggle('active', btn.dataset.theme === settings.colorTheme);
                 });
+                const themeModeLight = document.getElementById('theme-mode-light');
+                const themeModeDark = document.getElementById('theme-mode-dark');
+                if (themeModeLight) themeModeLight.classList.toggle('active', !settings.isDarkMode);
+                if (themeModeDark) themeModeDark.classList.toggle('active', !!settings.isDarkMode);
                 
                 showModal(DOMElements.appearanceModal.modal);
                 setTimeout(() => { 

@@ -879,6 +879,7 @@
             transition: var(--transition);
             font-family: var(--font-family);
             font-weight: 600;
+            flex-shrink: 0;
         }
         .action-btn:hover {
             background-color: rgba(var(--accent-color-rgb), 0.14);
@@ -903,6 +904,56 @@
         .action-btn-label {
             line-height: 1;
             letter-spacing: 0.02em;
+            white-space: nowrap;
+            writing-mode: horizontal-tb;
+        }
+        .theme-mode-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid rgba(var(--accent-color-rgb), 0.12);
+            background: linear-gradient(135deg, rgba(var(--accent-color-rgb), 0.08), rgba(var(--accent-color-rgb), 0.03));
+            margin-bottom: 12px;
+        }
+        .theme-mode-copy {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .theme-mode-copy strong {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+        .theme-mode-copy span {
+            font-size: 11px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+        .theme-mode-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .theme-mode-toggle {
+            border: 1px solid rgba(var(--accent-color-rgb), 0.12);
+            background: var(--secondary-bg);
+            color: var(--text-secondary);
+            border-radius: 999px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-family: var(--font-family);
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+        }
+        .theme-mode-toggle.active {
+            background: linear-gradient(135deg, rgba(var(--accent-color-rgb), 0.22), rgba(var(--accent-color-rgb), 0.08));
+            color: var(--text-primary);
+            border-color: rgba(var(--accent-color-rgb), 0.28);
+            box-shadow: 0 8px 20px rgba(var(--accent-color-rgb), 0.12);
         }
 
         .main-chat-area {
@@ -1655,7 +1706,8 @@
             flex-shrink: 0;
             transition: background 0.25s cubic-bezier(0.4,0,0.2,1);
         }
-        .setting-pill-row.active .setting-pill-switch {
+        .setting-pill-row.active .setting-pill-switch,
+        .setting-pill-switch.active {
             background: var(--accent-color);
         }
         .setting-pill-knob {
@@ -1669,7 +1721,8 @@
             transition: left 0.25s cubic-bezier(0.4,0,0.2,1), box-shadow 0.2s;
             box-shadow: 0 1px 4px rgba(0,0,0,0.2);
         }
-        .setting-pill-row.active .setting-pill-knob {
+        .setting-pill-row.active .setting-pill-knob,
+        .setting-pill-switch.active .setting-pill-knob {
             left: 22px;
         }
 
@@ -4784,11 +4837,41 @@
             .action-btn-label {
                 font-size: 12px;
             }
+            .theme-mode-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .theme-mode-actions {
+                width: 100%;
+            }
+            .theme-mode-toggle {
+                flex: 1;
+                text-align: center;
+            }
             .delivery-settings-footer {
                 flex-direction: column-reverse;
             }
             .delivery-settings-footer .modal-btn {
                 width: 100%;
+            }
+        }
+        @media (max-width: 480px) {
+            body.session-home-active .header-home-title {
+                display: none !important;
+            }
+            body.session-home-active .header-actions {
+                flex: 1;
+                width: 100%;
+            }
+            .header-actions {
+                gap: 4px;
+            }
+            .action-btn {
+                min-width: 54px;
+                padding: 0 8px;
+            }
+            .action-btn-label {
+                font-size: 11px;
             }
         }
 

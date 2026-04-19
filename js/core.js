@@ -1350,7 +1350,7 @@ autoSendIntervalSeconds: 300,
                 <div class="delivery-settings-header">
                     <div class="delivery-settings-copy">
                         <strong>${session.name} · 聊天设置</strong>
-                        <span>${isGroup ? '群聊的恢复与主动消息都在这里统一调整，频率都按秒填写。' : '这个聊天的恢复与主动消息都在这里统一调整，频率都按秒填写。'}</span>
+                        <span>${isGroup ? '群聊的恢复与主动消息都在这里统一调整，频率都按秒填写。主动发消息只在你切到别处时生效；恢复只在你离开后回来时生效。' : '这个聊天的恢复与主动消息都在这里统一调整，频率都按秒填写。主动发消息只在你切到别的会话时生效；恢复只在你离开后回来时生效。'}</span>
                     </div>
                     <button class="session-delivery-toggle ${config.enabled ? '' : 'disabled'}" id="delivery-enabled-toggle" type="button">${config.enabled ? '已开启' : '已关闭'}</button>
                 </div>
