@@ -1231,10 +1231,15 @@
                             <div class="setting-pill-switch"><div class="setting-pill-knob"></div></div>
                         </div>
                         <div id="auto-send-control" style="display:none;">
-                            <div class="delivery-form-grid" style="grid-template-columns:1fr;">
+                            <div class="delivery-form-grid">
                                 <label class="delivery-input-field">
-                                    <span>间隔</span>
-                                    <input type="number" min="1" step="1" value="300" id="auto-send-seconds-input">
+                                    <span>最短间隔</span>
+                                    <input type="number" min="1" step="1" value="300" id="auto-send-min-seconds-input">
+                                    <em>秒</em>
+                                </label>
+                                <label class="delivery-input-field">
+                                    <span>最长间隔</span>
+                                    <input type="number" min="1" step="1" value="300" id="auto-send-max-seconds-input">
                                     <em>秒</em>
                                 </label>
                             </div>

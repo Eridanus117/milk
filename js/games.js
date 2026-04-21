@@ -180,6 +180,12 @@ function renderStatsContent() {
             };
             const renderSessionItem = function(session) {
                 const isSystemChat = !!session.systemChatKey;
+                const systemEntry = isSystemChat && typeof window.getSystemChatSessions === 'function'
+                    ? (window.getSystemChatSessions().find(function(item) {
+                        return item && item.session && item.session.id === session.id;
+                    }) || null)
+                    : null;
+                const displayName = systemEntry && systemEntry.name ? systemEntry.name : session.name;
                 const unreadCount = session.id === SESSION_ID ? 0 : Math.max(0, Number(session.unreadCount || 0) || 0);
                 const unreadHtml = unreadCount > 0
                     ? '<span class="session-unread-dot">' + (unreadCount > 99 ? '99+' : unreadCount) + '</span>'
@@ -203,7 +209,7 @@ function renderStatsContent() {
                 </div>
                 <div class="session-info">
                     <div class="session-name">
-                        <span class="session-name-text">${session.name}</span>
+                        <span class="session-name-text">${displayName}</span>
                         ${chatTag}
                     </div>
                     <div class="session-preview-row">

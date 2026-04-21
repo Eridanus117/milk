@@ -1295,13 +1295,19 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
 
 const autoSendToggle = document.getElementById('auto-send-toggle');
 const autoSendControl = document.getElementById('auto-send-control');
-const autoSendSecondsInput = document.getElementById('auto-send-seconds-input');
+const autoSendMinSecondsInput = document.getElementById('auto-send-min-seconds-input');
+const autoSendMaxSecondsInput = document.getElementById('auto-send-max-seconds-input');
 
 const updateAutoSendUI = () => {
     autoSendToggle.classList.toggle('active', !!settings.autoSendEnabled);
     autoSendControl.style.display = settings.autoSendEnabled ? "flex" : "none";
-    const currentVal = settings.autoSendIntervalSeconds || 300;
-    if (autoSendSecondsInput) autoSendSecondsInput.value = String(currentVal);
+    const minSeconds = Math.max(1, Number(settings.autoSendIntervalMinSeconds || settings.autoSendIntervalSeconds || 300) || 300);
+    const maxSeconds = Math.max(minSeconds, Number(settings.autoSendIntervalMaxSeconds || settings.autoSendIntervalSeconds || minSeconds) || minSeconds);
+    if (autoSendMinSecondsInput) autoSendMinSecondsInput.value = String(minSeconds);
+    if (autoSendMaxSecondsInput) {
+        autoSendMaxSecondsInput.value = String(maxSeconds);
+        autoSendMaxSecondsInput.min = String(minSeconds);
+    }
 };
 
 updateAutoSendUI();
@@ -1314,12 +1320,29 @@ autoSendToggle.addEventListener('click', () => {
     showNotification(`主动发送已${settings.autoSendEnabled ? '开启' : '关闭'}`, 'success');
 });
 
-if (autoSendSecondsInput) {
-    autoSendSecondsInput.value = String(settings.autoSendIntervalSeconds || 300);
-    autoSendSecondsInput.addEventListener('input', (e) => {
-        settings.autoSendIntervalSeconds = Math.max(1, parseInt(e.target.value, 10) || 1);
+if (autoSendMinSecondsInput && autoSendMaxSecondsInput) {
+    const syncAutoSendInputs = () => {
+        const minSeconds = Math.max(1, parseInt(autoSendMinSecondsInput.value, 10) || 1);
+        let maxSeconds = Math.max(1, parseInt(autoSendMaxSecondsInput.value, 10) || 1);
+        if (minSeconds > maxSeconds) {
+            maxSeconds = minSeconds;
+            autoSendMaxSecondsInput.value = String(maxSeconds);
+        }
+        autoSendMaxSecondsInput.min = String(minSeconds);
+        settings.autoSendIntervalMinSeconds = minSeconds;
+        settings.autoSendIntervalMaxSeconds = maxSeconds;
+        settings.autoSendIntervalSeconds = minSeconds;
+    };
+    syncAutoSendInputs();
+    autoSendMinSecondsInput.addEventListener('input', syncAutoSendInputs);
+    autoSendMaxSecondsInput.addEventListener('input', syncAutoSendInputs);
+    autoSendMinSecondsInput.addEventListener('change', () => {
+        syncAutoSendInputs();
+        manageAutoSendTimer();
+        throttledSaveData();
     });
-    autoSendSecondsInput.addEventListener('change', () => {
+    autoSendMaxSecondsInput.addEventListener('change', () => {
+        syncAutoSendInputs();
         manageAutoSendTimer();
         throttledSaveData();
     });

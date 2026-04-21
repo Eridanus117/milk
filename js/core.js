@@ -170,6 +170,8 @@ function loadMoreHistory() {
                 myAvatarShape: 'circle',
                 partnerAvatarShape: 'circle',
 autoSendEnabled: false,
+autoSendIntervalMinSeconds: 300,
+autoSendIntervalMaxSeconds: 300,
 autoSendIntervalSeconds: 300,
         allowReadNoReply: false, 
         readNoReplyChance: 0.2,
@@ -659,6 +661,117 @@ autoSendIntervalSeconds: 300,
                 type: 'normal'
             };
             return Object.assign(base, extra || {});
+        }
+
+        async function markSessionUserMessagesRead(sessionId) {
+            const session = getSessionById(sessionId);
+            if (!session) return false;
+
+            if (sessionId === SESSION_ID) {
+                let changed = false;
+                messages.forEach(function(message) {
+                    if (message.sender === 'user' && message.status !== 'read') {
+                        message.status = 'read';
+                        changed = true;
+                    }
+                });
+                if (changed) {
+                    _updateReadReceiptsDOM();
+                    throttledSaveData();
+                }
+                return changed;
+            }
+
+            const storageKey = `${APP_PREFIX}${sessionId}_chatMessages`;
+            const storedMessages = await localforage.getItem(storageKey);
+            if (!Array.isArray(storedMessages) || storedMessages.length === 0) return false;
+
+            let changed = false;
+            const nextMessages = storedMessages.map(function(message) {
+                if (message && message.sender === 'user' && message.status !== 'read') {
+                    changed = true;
+                    return Object.assign({}, message, { status: 'read' });
+                }
+                return message;
+            });
+            if (!changed) return false;
+
+            await localforage.setItem(storageKey, nextMessages);
+            return true;
+        }
+
+        async function appendMessagesToSession(sessionId, generated, options) {
+            const session = getSessionById(sessionId);
+            const nextMessagesToAdd = Array.isArray(generated) ? generated.filter(Boolean) : [];
+            if (!session || nextMessagesToAdd.length === 0) return 0;
+            options = options || {};
+
+            if (sessionId === SESSION_ID) {
+                nextMessagesToAdd.forEach(function(message) {
+                    addMessage(message);
+                });
+                return nextMessagesToAdd.length;
+            }
+
+            const payload = options.payload && Array.isArray(options.payload.messages)
+                ? options.payload
+                : await readSessionDeliveryPayload(session);
+            const baseMessages = payload && Array.isArray(payload.messages) ? payload.messages : [];
+            const nextSessionMessages = baseMessages.concat(nextMessagesToAdd);
+
+            await localforage.setItem(`${APP_PREFIX}${session.id}_chatMessages`, nextSessionMessages);
+            await syncSessionSummary(session.id, {
+                messages: nextSessionMessages,
+                incrementUnread: Math.max(0, Number(options.incrementUnread) || nextMessagesToAdd.length),
+                persist: false
+            });
+            await persistSessionList();
+
+            if (options.notify !== false && typeof window._sendPartnerNotification === 'function') {
+                const lastMessage = nextMessagesToAdd[nextMessagesToAdd.length - 1];
+                window._sendPartnerNotification(
+                    lastMessage.sender || session.name || '传讯',
+                    lastMessage.image ? '[图片]' : (lastMessage.text || '发来了消息')
+                );
+            }
+
+            if (typeof renderSessionList === 'function') renderSessionList();
+            if (typeof updateUI === 'function') updateUI();
+            return nextMessagesToAdd.length;
+        }
+
+        async function deliverPendingReplyToSession(sessionId) {
+            const session = getSessionById(sessionId);
+            if (!session) return 0;
+
+            const payload = await readSessionDeliveryPayload(session);
+            if (!payload || !Array.isArray(payload.customReplies) || payload.customReplies.length === 0) return 0;
+
+            let generated = [];
+            if (session.systemChatKey) {
+                generated = await generateSessionReplies(sessionId, {
+                    payload: payload,
+                    eventTimestamp: Date.now()
+                });
+            } else {
+                const senderName = payload.settings.partnerName || session.name || '对方';
+                let replyText = pickScopedReplyText(payload, senderName);
+                if (replyText) {
+                    const emojiPool = Array.isArray(payload.customEmojis) ? payload.customEmojis.filter(Boolean) : [];
+                    if (emojiPool.length > 0 && Math.random() < 0.2) {
+                        const emoji = pickRandomFromArray(emojiPool);
+                        replyText = Math.random() < 0.5 ? `${emoji} ${replyText}` : `${replyText} ${emoji}`;
+                    }
+                    generated.push(buildGeneratedMessage(session, senderName, replyText, Date.now()));
+                }
+            }
+
+            if (!generated.length) return 0;
+            return appendMessagesToSession(sessionId, generated, {
+                payload: payload,
+                incrementUnread: generated.length,
+                notify: true
+            });
         }
 
         async function generateSessionReplies(sessionId, options) {
@@ -1758,15 +1871,25 @@ autoSendIntervalSeconds: 300,
         if (savedPartnerPersonas) partnerPersonas = savedPartnerPersonas;
 
         if (savedSettings) Object.assign(settings, savedSettings);
+        let legacyAutoSendSeconds = Number(settings.autoSendIntervalSeconds || 0);
         if (!savedSettings || savedSettings.autoSendIntervalSeconds === undefined) {
             const legacyMinutes = Number(settings.autoSendInterval || 0);
             if (legacyMinutes > 0) {
-                settings.autoSendIntervalSeconds = legacyMinutes * 60;
+                legacyAutoSendSeconds = legacyMinutes * 60;
             }
         }
-        if (!settings.autoSendIntervalSeconds || Number(settings.autoSendIntervalSeconds) < 1) {
-            settings.autoSendIntervalSeconds = 300;
+        if (!savedSettings || (savedSettings.autoSendIntervalMinSeconds === undefined && savedSettings.autoSendIntervalMaxSeconds === undefined)) {
+            const fallbackAutoSendSeconds = Math.max(1, legacyAutoSendSeconds || 300);
+            settings.autoSendIntervalMinSeconds = fallbackAutoSendSeconds;
+            settings.autoSendIntervalMaxSeconds = fallbackAutoSendSeconds;
+        } else {
+            settings.autoSendIntervalMinSeconds = Math.max(1, Number(settings.autoSendIntervalMinSeconds || legacyAutoSendSeconds || 300) || 300);
+            settings.autoSendIntervalMaxSeconds = Math.max(
+                settings.autoSendIntervalMinSeconds,
+                Number(settings.autoSendIntervalMaxSeconds || settings.autoSendIntervalMinSeconds) || settings.autoSendIntervalMinSeconds
+            );
         }
+        settings.autoSendIntervalSeconds = settings.autoSendIntervalMinSeconds;
 
         if (settings.showPartnerNameInChat !== undefined) {
             showPartnerNameInChat = settings.showPartnerNameInChat;
@@ -2230,19 +2353,31 @@ if (customIntros && customIntros.length > 0) {
             });
         }
 
+function getAutoSendDelayMs() {
+    const minSeconds = Math.max(1, Number(settings.autoSendIntervalMinSeconds || settings.autoSendIntervalSeconds || 300) || 300);
+    const maxSeconds = Math.max(minSeconds, Number(settings.autoSendIntervalMaxSeconds || settings.autoSendIntervalSeconds || minSeconds) || minSeconds);
+    return (minSeconds + Math.random() * (maxSeconds - minSeconds)) * 1000;
+}
+
+function scheduleNextAutoSend() {
+    if (!settings.autoSendEnabled) return;
+    autoSendTimer = setTimeout(() => {
+        autoSendTimer = null;
+        if (!settings.autoSendEnabled) return;
+        if (!document.hidden && !document.body.classList.contains('batch-favorite-mode')) {
+            simulateReply();
+        }
+        scheduleNextAutoSend();
+    }, getAutoSendDelayMs());
+}
+
 function manageAutoSendTimer() {
     if (autoSendTimer) {
-        clearInterval(autoSendTimer);
+        clearTimeout(autoSendTimer);
         autoSendTimer = null;
     }
     if (settings.autoSendEnabled) {
-        const intervalMs = Math.max(1, Number(settings.autoSendIntervalSeconds || 300) || 300) * 1000;
-        
-        autoSendTimer = setInterval(() => {
-            if (!document.body.classList.contains('batch-favorite-mode')) {
-                simulateReply(); 
-            }
-        }, intervalMs);
+        scheduleNextAutoSend();
     }
 }
 
@@ -2891,24 +3026,21 @@ const addMessage = (message) => {
 if (!isBatchMode && type === 'normal') {
     const delayRange = settings.replyDelayMax - settings.replyDelayMin;
     const randomDelay = settings.replyDelayMin + Math.random() * delayRange;
+    const replySessionId = SESSION_ID;
 
     const chance = Math.max(0, Math.min(1, Number(settings.readNoReplyChance) || 0));
     const shouldIgnore = settings.allowReadNoReply && (Math.random() < chance);
 
     const readDelay = 1500 + Math.random() * 2500;
                 setTimeout(() => {
-        let changed = false;
-        messages.forEach(msg => {
-            if (msg.sender === 'user' && msg.status !== 'read') {
-                msg.status = 'read';
-                changed = true;
-            }
+        markSessionUserMessagesRead(replySessionId).catch(function(error) {
+            console.warn('[reply] 标记已读失败:', error);
         });
-        if (changed) { _updateReadReceiptsDOM(); throttledSaveData(); }
     }, readDelay);
 
     if (window._pendingReplyTimer) clearTimeout(window._pendingReplyTimer);
     window._pendingReplyTimer = null;
+    window._pendingReplySessionId = null;
 
             if (!shouldIgnore) {
         if (settings.typingIndicatorEnabled) {
@@ -2919,9 +3051,18 @@ if (!isBatchMode && type === 'normal') {
                 showTypingIndicatorForMember(activeRole);
             }
         }
+        window._pendingReplySessionId = replySessionId;
         window._pendingReplyTimer = setTimeout(() => {
+            const targetSessionId = window._pendingReplySessionId || replySessionId;
             window._pendingReplyTimer = null;
-            simulateReply();
+            window._pendingReplySessionId = null;
+            if (targetSessionId === SESSION_ID) {
+                simulateReply();
+                return;
+            }
+            deliverPendingReplyToSession(targetSessionId).catch(function(error) {
+                console.warn('[reply] 跨会话补发失败:', error);
+            });
         }, randomDelay);
     }
 }
