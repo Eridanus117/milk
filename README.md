@@ -60,6 +60,7 @@
 
 ## 维护文档
 
+- 项目总览与文档导航见 [docs/project-overview.md](/Users/a123/Documents/milk/docs/project-overview.md)
 - 维护入口说明见 [docs/maintainer-guide.md](/Users/a123/Documents/milk/docs/maintainer-guide.md)
 - 里面重点写了：
   - 系统 `6` 聊的数据模型
