@@ -18,16 +18,16 @@
     <meta name="apple-mobile-web-app-title" content="ʚ𝑳𝑶𝑽𝑬ɞ">
     <script>
         window.__BUILD_INFO__ = {
-            version: '2026.04.19',
-            buildTime: '2026-04-19T10:30:00-07:00',
-            assetVersion: '20260419-1'
+            version: '2026.05.05',
+            buildTime: '2026-05-05T06:48:14-0700',
+            assetVersion: '20260505-064814'
         };
     </script>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <link rel="stylesheet" href="css/styles.css?v=20260419-1">
+    <link rel="stylesheet" href="css/styles.css?v=20260505-064814">
 
     <style id="css-live-preview-style"></style>
 </head>
@@ -678,6 +678,10 @@
                     <i class="fas fa-palette"></i>
                     <span>外观与主题</span>
                 </div>
+                <div class="settings-card" id="chat-settings">
+                    <i class="fas fa-comments"></i>
+                    <span>聊天设置</span>
+                </div>
                 <div class="settings-card" id="reopen-daily-greeting">
                     <i class="fas fa-newspaper"></i>
                     <span>今日公告</span>
@@ -1209,17 +1213,15 @@
                 <div class="cs-panel" id="cs-panel-rhythm">
                     <p class="cs-group-label">回复速度</p>
                     <div class="cs-card" style="margin-bottom:10px;">
-                        <div class="delivery-form-grid">
-                            <label class="delivery-input-field">
-                                <span>最短等待</span>
-                                <input type="number" min="1" step="1" value="3" id="reply-delay-min-input">
-                                <em>秒</em>
-                            </label>
-                            <label class="delivery-input-field">
-                                <span>最长等待</span>
-                                <input type="number" min="1" step="1" value="7" id="reply-delay-max-input">
-                                <em>秒</em>
-                            </label>
+                        <div class="cs-slider-row">
+                            <span class="cs-slider-label">最短等待</span>
+                            <input type="range" min="1000" max="30000" step="1000" value="3000" class="font-size-slider" id="reply-delay-min-slider">
+                            <span class="cs-slider-val" id="reply-delay-min-value">3s</span>
+                        </div>
+                        <div class="cs-slider-row">
+                            <span class="cs-slider-label">最长等待</span>
+                            <input type="range" min="1000" max="120000" step="1000" value="7000" class="font-size-slider" id="reply-delay-max-slider">
+                            <span class="cs-slider-val" id="reply-delay-max-value">7s</span>
                         </div>
                     </div>
 
@@ -1231,17 +1233,10 @@
                             <div class="setting-pill-switch"><div class="setting-pill-knob"></div></div>
                         </div>
                         <div id="auto-send-control" style="display:none;">
-                            <div class="delivery-form-grid">
-                                <label class="delivery-input-field">
-                                    <span>最短间隔</span>
-                                    <input type="number" min="1" step="1" value="300" id="auto-send-min-seconds-input">
-                                    <em>秒</em>
-                                </label>
-                                <label class="delivery-input-field">
-                                    <span>最长间隔</span>
-                                    <input type="number" min="1" step="1" value="300" id="auto-send-max-seconds-input">
-                                    <em>秒</em>
-                                </label>
+                            <div class="cs-slider-row">
+                                <span class="cs-slider-label">间隔</span>
+                                <input type="range" min="1" max="120" step="1" value="5" class="font-size-slider" id="auto-send-slider">
+                                <span class="cs-slider-val" id="auto-send-value">5分钟</span>
                             </div>
                         </div>
                     </div>
@@ -2313,27 +2308,27 @@
 
 <div id="dg-editor-modal" style="display:none;"></div>
     <!-- == 核心层 == -->
-    <script src="js/config.js?v=20260419-1"></script>
-    <script src="js/utils.js?v=20260419-1"></script>
-    <script src="js/backup-engine.js?v=20260419-1"></script>
-    <script src="js/state.js?v=20260419-1"></script>
-    <script src="js/presets.js?v=20260419-1"></script>
-    <script src="js/core.js?v=20260419-1"></script>
+    <script src="js/config.js?v=20260505-064814"></script>
+    <script src="js/utils.js?v=20260505-064814"></script>
+    <script src="js/backup-engine.js?v=20260505-064814"></script>
+    <script src="js/state.js?v=20260505-064814"></script>
+    <script src="js/presets.js?v=20260505-064814"></script>
+    <script src="js/core.js?v=20260505-064814"></script>
 
     <!-- == 功能模块 == -->
-    <script src="js/features/mood.js?v=20260419-1"></script>
-    <script src="js/features/envelope.js?v=20260419-1"></script>
-    <script src="js/features/reply-library.js?v=20260419-1"></script>
-    <script src="js/features/theme-editor.js?v=20260419-1"></script>
-    <script src="js/features/group-chat.js?v=20260419-1"></script>
-    <script src="js/features/call.js?v=20260419-1"></script>
+    <script src="js/features/mood.js?v=20260505-064814"></script>
+    <script src="js/features/envelope.js?v=20260505-064814"></script>
+    <script src="js/features/reply-library.js?v=20260505-064814"></script>
+    <script src="js/features/theme-editor.js?v=20260505-064814"></script>
+    <script src="js/features/group-chat.js?v=20260505-064814"></script>
+    <script src="js/features/call.js?v=20260505-064814"></script>
 
     <!-- == 合并模块 == -->
-    <script src="js/games.js?v=20260419-1"></script> 
-    <script src="js/features.js?v=20260419-1"></script> 
-    <script src="js/data.js?v=20260419-1"></script>
-    <script src="js/onboarding.js?v=20260419-1"></script> 
-    <script src="js/listeners.js?v=20260419-1"></script>
-    <script src="js/app.js?v=20260419-1"></script>
+    <script src="js/games.js?v=20260505-064814"></script> 
+    <script src="js/features.js?v=20260505-064814"></script> 
+    <script src="js/data.js?v=20260505-064814"></script>
+    <script src="js/onboarding.js?v=20260505-064814"></script> 
+    <script src="js/listeners.js?v=20260505-064814"></script>
+    <script src="js/app.js?v=20260505-064814"></script>
 </body>
 </html>

@@ -153,7 +153,7 @@ const { chromium } = require('playwright');
   const buildVersion = await page.locator('#build-version').innerText();
   const buildTime = await page.locator('#build-time').innerText();
   const updateText = await page.locator('#update-status-text').innerText();
-  push('build version displayed', buildVersion === '2026.04.19', buildVersion);
+  push('build version displayed', !!buildVersion && buildVersion !== '-', buildVersion);
   push('build time displayed', !!buildTime && buildTime !== '-', buildTime);
   push('update status rendered', !!updateText, updateText);
 

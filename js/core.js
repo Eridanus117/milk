@@ -170,9 +170,7 @@ function loadMoreHistory() {
                 myAvatarShape: 'circle',
                 partnerAvatarShape: 'circle',
 autoSendEnabled: false,
-autoSendIntervalMinSeconds: 300,
-autoSendIntervalMaxSeconds: 300,
-autoSendIntervalSeconds: 300,
+autoSendInterval: 5,
         allowReadNoReply: false, 
         readNoReplyChance: 0.2,
         timeFormat: 'HH:mm',
@@ -1197,7 +1195,38 @@ autoSendIntervalSeconds: 300,
             ]);
         }
 
+        function normalizeGroupMembersOrderToPreset() {
+            if (typeof groupChatSettings === 'undefined' || !Array.isArray(groupChatSettings.members) || !groupChatSettings.members.length) return false;
+            const preset = window.LYSK_BUNDLED_PRESET || {};
+            const presetMembers = (preset.groupChatSettings && Array.isArray(preset.groupChatSettings.members)) ? preset.groupChatSettings.members : [];
+            if (!presetMembers.length) return false;
+
+            const byId = new Map();
+            groupChatSettings.members.forEach(function(m) { if (m && m.id) byId.set(m.id, m); });
+
+            const ordered = [];
+            presetMembers.forEach(function(pm) {
+                if (pm && pm.id && byId.has(pm.id)) {
+                    ordered.push(byId.get(pm.id));
+                    byId.delete(pm.id);
+                }
+            });
+            byId.forEach(function(m) { ordered.push(m); });
+
+            const orderChanged = ordered.length !== groupChatSettings.members.length
+                || ordered.some(function(m, i) { return m !== groupChatSettings.members[i]; });
+
+            if (orderChanged) {
+                groupChatSettings.members = ordered;
+                if (typeof saveGroupChatSettings === 'function') {
+                    try { saveGroupChatSettings(); } catch (e) {}
+                }
+            }
+            return orderChanged;
+        }
+
         async function ensureSystemChatSessions(activeSessionId) {
+            normalizeGroupMembersOrderToPreset();
             const definitions = getSystemChatDefinitions();
             const byKey = new Map();
             sessionList.forEach(function(session) {
@@ -1258,6 +1287,25 @@ autoSendIntervalSeconds: 300,
                 createdSessions.push(session);
                 changed = true;
             });
+
+            const dmDefs = definitions.filter(function(def) { return def.type === 'dm'; });
+            const dmSessions = dmDefs.map(function(def) { return byKey.get(def.key); }).filter(Boolean);
+            if (dmSessions.length === dmDefs.length && dmSessions.length > 0) {
+                const ts = dmSessions.map(function(s) { return s.createdAt || 0; });
+                const hasDuplicateTs = ts.some(function(v, i) { return ts.indexOf(v) !== i; });
+                const sortedByCreatedAt = dmSessions.slice().sort(function(a, b) {
+                    return (a.createdAt || 0) - (b.createdAt || 0);
+                });
+                const orderMatches = sortedByCreatedAt.every(function(s, i) { return s === dmSessions[i]; });
+                if (hasDuplicateTs || !orderMatches) {
+                    const groupSession = byKey.get('group');
+                    const baseTs = (groupSession && groupSession.createdAt) || Date.now();
+                    dmSessions.forEach(function(session, idx) {
+                        session.createdAt = baseTs + 1 + idx;
+                    });
+                    changed = true;
+                }
+            }
 
             if (changed) {
                 await persistSessionList();
@@ -1871,25 +1919,17 @@ autoSendIntervalSeconds: 300,
         if (savedPartnerPersonas) partnerPersonas = savedPartnerPersonas;
 
         if (savedSettings) Object.assign(settings, savedSettings);
-        let legacyAutoSendSeconds = Number(settings.autoSendIntervalSeconds || 0);
-        if (!savedSettings || savedSettings.autoSendIntervalSeconds === undefined) {
-            const legacyMinutes = Number(settings.autoSendInterval || 0);
-            if (legacyMinutes > 0) {
-                legacyAutoSendSeconds = legacyMinutes * 60;
+        if (!Number.isFinite(settings.autoSendInterval) || settings.autoSendInterval <= 0) {
+            const legacySeconds = Number(settings.autoSendIntervalMinSeconds || settings.autoSendIntervalSeconds || 0);
+            if (legacySeconds > 0) {
+                settings.autoSendInterval = Math.max(1, Math.round(legacySeconds / 60));
+            } else {
+                settings.autoSendInterval = 5;
             }
         }
-        if (!savedSettings || (savedSettings.autoSendIntervalMinSeconds === undefined && savedSettings.autoSendIntervalMaxSeconds === undefined)) {
-            const fallbackAutoSendSeconds = Math.max(1, legacyAutoSendSeconds || 300);
-            settings.autoSendIntervalMinSeconds = fallbackAutoSendSeconds;
-            settings.autoSendIntervalMaxSeconds = fallbackAutoSendSeconds;
-        } else {
-            settings.autoSendIntervalMinSeconds = Math.max(1, Number(settings.autoSendIntervalMinSeconds || legacyAutoSendSeconds || 300) || 300);
-            settings.autoSendIntervalMaxSeconds = Math.max(
-                settings.autoSendIntervalMinSeconds,
-                Number(settings.autoSendIntervalMaxSeconds || settings.autoSendIntervalMinSeconds) || settings.autoSendIntervalMinSeconds
-            );
-        }
-        settings.autoSendIntervalSeconds = settings.autoSendIntervalMinSeconds;
+        delete settings.autoSendIntervalMinSeconds;
+        delete settings.autoSendIntervalMaxSeconds;
+        delete settings.autoSendIntervalSeconds;
 
         if (settings.showPartnerNameInChat !== undefined) {
             showPartnerNameInChat = settings.showPartnerNameInChat;
@@ -2353,31 +2393,18 @@ if (customIntros && customIntros.length > 0) {
             });
         }
 
-function getAutoSendDelayMs() {
-    const minSeconds = Math.max(1, Number(settings.autoSendIntervalMinSeconds || settings.autoSendIntervalSeconds || 300) || 300);
-    const maxSeconds = Math.max(minSeconds, Number(settings.autoSendIntervalMaxSeconds || settings.autoSendIntervalSeconds || minSeconds) || minSeconds);
-    return (minSeconds + Math.random() * (maxSeconds - minSeconds)) * 1000;
-}
-
-function scheduleNextAutoSend() {
-    if (!settings.autoSendEnabled) return;
-    autoSendTimer = setTimeout(() => {
-        autoSendTimer = null;
-        if (!settings.autoSendEnabled) return;
-        if (!document.hidden && !document.body.classList.contains('batch-favorite-mode')) {
-            simulateReply();
-        }
-        scheduleNextAutoSend();
-    }, getAutoSendDelayMs());
-}
-
 function manageAutoSendTimer() {
     if (autoSendTimer) {
-        clearTimeout(autoSendTimer);
+        clearInterval(autoSendTimer);
         autoSendTimer = null;
     }
     if (settings.autoSendEnabled) {
-        scheduleNextAutoSend();
+        const intervalMs = (settings.autoSendInterval || 5) * 60 * 1000;
+        autoSendTimer = setInterval(() => {
+            if (!document.hidden && !document.body.classList.contains('batch-favorite-mode')) {
+                simulateReply();
+            }
+        }, intervalMs);
     }
 }
 

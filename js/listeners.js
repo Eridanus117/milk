@@ -1044,8 +1044,10 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
                 });
             });
             
-            const minDelayInput = document.getElementById('reply-delay-min-input');
-            const maxDelayInput = document.getElementById('reply-delay-max-input');
+            const minDelaySlider = document.getElementById('reply-delay-min-slider');
+            const minDelayValue = document.getElementById('reply-delay-min-value');
+            const maxDelaySlider = document.getElementById('reply-delay-max-slider');
+            const maxDelayValue = document.getElementById('reply-delay-max-value');
 
             window.switchCsTab = function switchCsTab(btn) {
                 document.querySelectorAll('.cs-tab').forEach(t => t.classList.remove('active'));
@@ -1056,31 +1058,33 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
             };
 
             function updateDelayUI() {
-                if (minDelayInput) minDelayInput.value = String(Math.max(1, Math.round((settings.replyDelayMin || 3000) / 1000)));
-                if (maxDelayInput) {
-                    maxDelayInput.value = String(Math.max(1, Math.round((settings.replyDelayMax || 7000) / 1000)));
-                    maxDelayInput.min = minDelayInput ? minDelayInput.value : '1';
-                }
+                minDelaySlider.value = settings.replyDelayMin;
+                const minSec = settings.replyDelayMin / 1000;
+                minDelayValue.textContent = minSec >= 60 ? `${(minSec/60).toFixed(1)}分钟` : `${minSec.toFixed(0)}s`;
+                maxDelaySlider.value = settings.replyDelayMax;
+                const maxSec = settings.replyDelayMax / 1000;
+                maxDelayValue.textContent = maxSec >= 60 ? `${(maxSec/60).toFixed(1)}分钟` : `${maxSec.toFixed(0)}s`;
+                maxDelaySlider.min = settings.replyDelayMin;
             }
             updateDelayUI();
 
-            if (minDelayInput && maxDelayInput) {
-                const syncDelayInputs = () => {
-                    const minSeconds = Math.max(1, parseInt(minDelayInput.value, 10) || 1);
-                    let maxSeconds = Math.max(1, parseInt(maxDelayInput.value, 10) || 1);
-                    if (minSeconds > maxSeconds) {
-                        maxSeconds = minSeconds;
-                        maxDelayInput.value = String(maxSeconds);
-                    }
-                    maxDelayInput.min = String(minSeconds);
-                    settings.replyDelayMin = minSeconds * 1000;
-                    settings.replyDelayMax = maxSeconds * 1000;
-                };
-                minDelayInput.addEventListener('input', syncDelayInputs);
-                maxDelayInput.addEventListener('input', syncDelayInputs);
-                minDelayInput.addEventListener('change', () => { syncDelayInputs(); throttledSaveData(); });
-                maxDelayInput.addEventListener('change', () => { syncDelayInputs(); throttledSaveData(); });
-            }
+            minDelaySlider.addEventListener('input', (e) => {
+                settings.replyDelayMin = parseInt(e.target.value, 10);
+                if (settings.replyDelayMin > settings.replyDelayMax) {
+                    settings.replyDelayMax = settings.replyDelayMin;
+                }
+                updateDelayUI();
+            });
+            minDelaySlider.addEventListener('change', throttledSaveData);
+
+            maxDelaySlider.addEventListener('input', (e) => {
+                settings.replyDelayMax = parseInt(e.target.value, 10);
+                if (settings.replyDelayMax < settings.replyDelayMin) {
+                    settings.replyDelayMin = settings.replyDelayMax;
+                }
+                updateDelayUI();
+            });
+            maxDelaySlider.addEventListener('change', throttledSaveData);
 
             const settingToggles = {
                 '#reply-toggle': {
@@ -1295,19 +1299,15 @@ if (_chatSettingsEl) _chatSettingsEl.addEventListener('click', () => {
 
 const autoSendToggle = document.getElementById('auto-send-toggle');
 const autoSendControl = document.getElementById('auto-send-control');
-const autoSendMinSecondsInput = document.getElementById('auto-send-min-seconds-input');
-const autoSendMaxSecondsInput = document.getElementById('auto-send-max-seconds-input');
+const autoSendSlider = document.getElementById('auto-send-slider');
+const autoSendValue = document.getElementById('auto-send-value');
 
 const updateAutoSendUI = () => {
     autoSendToggle.classList.toggle('active', !!settings.autoSendEnabled);
     autoSendControl.style.display = settings.autoSendEnabled ? "flex" : "none";
-    const minSeconds = Math.max(1, Number(settings.autoSendIntervalMinSeconds || settings.autoSendIntervalSeconds || 300) || 300);
-    const maxSeconds = Math.max(minSeconds, Number(settings.autoSendIntervalMaxSeconds || settings.autoSendIntervalSeconds || minSeconds) || minSeconds);
-    if (autoSendMinSecondsInput) autoSendMinSecondsInput.value = String(minSeconds);
-    if (autoSendMaxSecondsInput) {
-        autoSendMaxSecondsInput.value = String(maxSeconds);
-        autoSendMaxSecondsInput.min = String(minSeconds);
-    }
+    const currentVal = settings.autoSendInterval || 5;
+    autoSendSlider.value = currentVal;
+    autoSendValue.textContent = `${currentVal}分钟`;
 };
 
 updateAutoSendUI();
@@ -1315,38 +1315,24 @@ updateAutoSendUI();
 autoSendToggle.addEventListener('click', () => {
     settings.autoSendEnabled = !settings.autoSendEnabled;
     updateAutoSendUI();
-    manageAutoSendTimer(); 
+    manageAutoSendTimer();
     throttledSaveData();
     showNotification(`主动发送已${settings.autoSendEnabled ? '开启' : '关闭'}`, 'success');
 });
 
-if (autoSendMinSecondsInput && autoSendMaxSecondsInput) {
-    const syncAutoSendInputs = () => {
-        const minSeconds = Math.max(1, parseInt(autoSendMinSecondsInput.value, 10) || 1);
-        let maxSeconds = Math.max(1, parseInt(autoSendMaxSecondsInput.value, 10) || 1);
-        if (minSeconds > maxSeconds) {
-            maxSeconds = minSeconds;
-            autoSendMaxSecondsInput.value = String(maxSeconds);
-        }
-        autoSendMaxSecondsInput.min = String(minSeconds);
-        settings.autoSendIntervalMinSeconds = minSeconds;
-        settings.autoSendIntervalMaxSeconds = maxSeconds;
-        settings.autoSendIntervalSeconds = minSeconds;
-    };
-    syncAutoSendInputs();
-    autoSendMinSecondsInput.addEventListener('input', syncAutoSendInputs);
-    autoSendMaxSecondsInput.addEventListener('input', syncAutoSendInputs);
-    autoSendMinSecondsInput.addEventListener('change', () => {
-        syncAutoSendInputs();
-        manageAutoSendTimer();
-        throttledSaveData();
-    });
-    autoSendMaxSecondsInput.addEventListener('change', () => {
-        syncAutoSendInputs();
-        manageAutoSendTimer();
-        throttledSaveData();
-    });
-}
+autoSendSlider.value = settings.autoSendInterval || 5;
+autoSendValue.textContent = `${settings.autoSendInterval || 5}分钟`;
+
+autoSendSlider.addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    settings.autoSendInterval = val;
+    autoSendValue.textContent = `${val}分钟`;
+});
+
+autoSendSlider.addEventListener('change', () => {
+    manageAutoSendTimer();
+    throttledSaveData();
+});
 
             const resetBgBtn = document.getElementById('reset-default-bg');
             if (resetBgBtn) {
